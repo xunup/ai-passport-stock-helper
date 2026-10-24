@@ -15,6 +15,13 @@
 - 添加字库前评估 Flash 与内部 RAM 影响；ESP32-C3 无 PSRAM。
 - 不提交许可不允许分发的字库。
 
+| 文件 | 格式与覆盖范围 | 用途、来源与许可 |
+| --- | --- | --- |
+| [`fonts/lv_font_cn_16.c`](fonts/lv_font_cn_16.c) | LVGL 9 C 源码，16 px，2 bpp；ASCII、GB2312 一级汉字与 23 个界面标点（共 3873 个码位，其中 3778 个 CJK 字形） | 股票盯盘应用的中文界面字体，由 `main/CMakeLists.txt` 编译进应用。基于思源黑体 SC Regular（Source Han Sans SC Regular，Copyright 2014-2025 Adobe）生成，采用 SIL Open Font License 1.1；许可全文见 [`fonts/LICENSE-OFL.txt`](fonts/LICENSE-OFL.txt)。使用 `python3 tools/gen_cjk_font.py --font <SourceHanSansSC-Regular.otf>` 重新生成，输出写入 `assets/fonts/`。字形数据为 `const`，链接进 flash 的 `.rodata`，不占 DRAM。 |
+| [`fonts/lv_font_cn_22.c`](fonts/lv_font_cn_22.c) | LVGL 9 C 源码，22 px，2 bpp；同样覆盖 3873 个码位、3778 个 CJK 字形 | 用于行情价格与标题的较大号伴随字体，来源、许可、生成命令、集成方式与 Flash 放置方式均与 16 px 字体相同。 |
+
+生成器有意只收录 GB2312 一级汉字，以控制两款字体的 Flash 占用。当前股票盯盘固件中，两款字体合计约占 768 KB Flash（16 px：279 KB；22 px：489 KB），全部位于 `.rodata`，不消耗 DRAM。设备上遇到含二级汉字的动态股票名时，该字显示为 `?`；完整名称仍可在配置网页查看。
+
 ## 图片（images）
 
 可复用的源图与生成的显示资产放在 `images/`。

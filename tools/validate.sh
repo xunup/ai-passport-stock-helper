@@ -57,19 +57,47 @@ run_static_checks() {
         tests/test_bsp_audio_recovery.c components/bsp/src/bsp_es8311_sleep_check.c \
         -o "${test_dir}/test_bsp_audio_recovery"
     "${test_dir}/test_bsp_audio_recovery"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_stock_codes.c main/stock_codes.c \
+        -o "${test_dir}/test_stock_codes"
+    "${test_dir}/test_stock_codes"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_quote_parse.c main/quote_parse.c main/gbk_table.c -lm \
+        -o "${test_dir}/test_quote_parse"
+    "${test_dir}/test_quote_parse"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_quote_format.c main/quote_format.c -lm \
+        -o "${test_dir}/test_quote_format"
+    "${test_dir}/test_quote_format"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_ui_model.c main/ui_model.c \
+        -o "${test_dir}/test_ui_model"
+    "${test_dir}/test_ui_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_menu_model.c main/menu_model.c \
+        -o "${test_dir}/test_menu_model"
+    "${test_dir}/test_menu_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_roam_policy.c main/roam_policy.c \
+        -o "${test_dir}/test_roam_policy"
+    "${test_dir}/test_roam_policy"
     for demo in audio low_power ble wifi; do
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror \
-            -ffunction-sections -fdata-sections -Itests/demo_stubs -Imain \
+            -ffunction-sections -fdata-sections \
+            -fno-asynchronous-unwind-tables -fno-unwind-tables \
+            -Itests/demo_stubs -Imain \
             "tests/test_demo_${demo}_runtime.c" -Wl,--gc-sections \
             -o "${test_dir}/test_demo_${demo}_runtime"
         "${test_dir}/test_demo_${demo}_runtime"
     done
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_deep_sleep_contract.py
-    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_key_wake_contract.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_app_contract.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_check_repo.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_verify_firmware.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_archive_firmware.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_install_passport_skills.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_font_coverage.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_web_page.py
     rm -rf "${test_dir}"
     echo "Host tests: PASS"
 }

@@ -17,6 +17,13 @@ Store reusable font files and generated font sources in `fonts/`.
 - Check Flash and internal-RAM impact before adding a font; the ESP32-C3 has no PSRAM.
 - Do not commit fonts whose license does not permit redistribution.
 
+| File | Format and coverage | Use, source, and license |
+| --- | --- | --- |
+| [`fonts/lv_font_cn_16.c`](fonts/lv_font_cn_16.c) | LVGL 9 C source, 16 px, 2 bpp; ASCII, GB2312 level-1 Hanzi, and 23 UI punctuation marks (3,873 codepoints, including 3,778 CJK glyphs) | Chinese UI font for the stock ticker application, compiled by `main/CMakeLists.txt`. Generated from Source Han Sans SC Regular, Copyright 2014-2025 Adobe, under the SIL Open Font License 1.1; the license text is in [`fonts/LICENSE-OFL.txt`](fonts/LICENSE-OFL.txt). Regenerate with `python3 tools/gen_cjk_font.py --font <SourceHanSansSC-Regular.otf>`; output is written to `assets/fonts/`. Glyph data is `const` and linked into flash `.rodata`, so it does not consume DRAM. |
+| [`fonts/lv_font_cn_22.c`](fonts/lv_font_cn_22.c) | LVGL 9 C source, 22 px, 2 bpp; same 3,873 codepoints and 3,778 CJK glyphs | Larger companion font for quote prices and headings, with the same source, license, generation command, integration, and flash placement as the 16 px font. |
+
+The generator intentionally limits Hanzi to GB2312 level one so the two fonts fit the 8 MB flash budget. In the current stock ticker firmware the two fonts occupy about 768 KB of flash (16 px: 279 KB; 22 px: 489 KB), entirely in `.rodata`, with no DRAM cost. A dynamic stock name containing a level-two character is replaced with `?` on the device; the full name remains available on the configuration page.
+
 ## Images
 
 Store reusable source images and generated display assets in `images/`.

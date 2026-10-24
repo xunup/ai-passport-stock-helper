@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>股票盯盘 · 设备配置</title>
+<style>
+:root {
+    --bg: #070b12;
+    --panel: #101824;
+    --panel-2: #0b111a;
+    --line: #1e2a3a;
+    --text: #e6edf3;
+    --muted: #8a97a8;
+    --accent: #4a9eff;
+    --up: #ff5a5f;
+    --down: #2fd07a;
+    --warn: #f5c542;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+    min-height: 100vh;
+    background:
+        radial-gradient(900px 420px at 15% -10%, rgba(74, 158, 255, 0.16), transparent 60%),
+        radial-gradient(700px 380px at 110% 10%, rgba(47, 208, 122, 0.08), transparent 55%),
+        var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 22px 16px 40px; }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.logo {
+    width: 44px; height: 44px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 12px;
+    background: linear-gradient(150deg, #1d4ed8, #0ea5e9);
+    box-shadow: 0 8px 24px rgba(29, 78, 216, 0.35);
+}
+h1 { font-size: 21px; margin: 0; letter-spacing: 0.5px; }
+.sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.chip {
+    margin-left: auto; flex: 0 0 auto;
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--accent); border-radius: 999px;
+    padding: 5px 11px; font-size: 12px; font-family: "SFMono-Regular", Consolas, monospace;
+    white-space: nowrap;
+}
+.banner {
+    display: none;
+    border: 1px solid rgba(74, 158, 255, 0.35);
+    background: rgba(74, 158, 255, 0.08);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 16px;
+    color: #cfe4ff; font-size: 13.5px;
+}
+.banner.show { display: block; }
+.card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.card h2 {
+    font-size: 15px; margin: 0 0 12px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+}
+.card h2::before {
+    content: ""; width: 3px; height: 15px; border-radius: 2px;
+    background: var(--accent); display: inline-block;
+}
+.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.status-item { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; }
+.status-item .k { color: var(--muted); font-size: 11.5px; letter-spacing: 0.4px; }
+.status-item .v { font-size: 14px; margin-top: 3px; word-break: break-all; }
+.status-item .v .small { font-size: 11.5px; color: var(--muted); display: block; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; }
+.badge.ok { color: var(--down); background: rgba(47, 208, 122, 0.12); }
+.badge.bad { color: var(--up); background: rgba(255, 90, 95, 0.12); }
+.badge.wait { color: var(--warn); background: rgba(245, 197, 66, 0.12); }
+label.field { display: block; margin-bottom: 12px; }
+label.field span { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 6px; }
+input, textarea {
+    width: 100%; color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14.5px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, textarea:focus {
+    border-color: rgba(74, 158, 255, 0.7);
+    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.12);
+}
+textarea { resize: vertical; min-height: 74px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13.5px; letter-spacing: 0.3px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.row > .grow { flex: 1 1 210px; }
+.row > .tight { flex: 0 0 130px; }
+button {
+    border: 1px solid transparent; border-radius: 10px;
+    padding: 10px 15px; font-size: 14px; font-family: inherit;
+    cursor: pointer; transition: filter 0.15s, background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+button:disabled { opacity: 0.55; cursor: default; }
+button.primary { background: var(--accent); color: #04101f; font-weight: 600; }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+button.ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button.danger { background: transparent; color: var(--up); border-color: rgba(255, 90, 95, 0.35); }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.networks { margin-top: 12px; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; display: none; }
+.networks.show { display: block; }
+.net { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--panel-2); cursor: pointer; border-bottom: 1px solid var(--line); }
+.net:last-child { border-bottom: none; }
+.net:hover { background: #101b2a; }
+.net .name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net .meta { color: var(--muted); font-size: 11.5px; flex: 0 0 auto; }
+.quotes { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.quotes th { color: var(--muted); font-size: 11.5px; font-weight: 500; text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.quotes th:first-child { text-align: left; }
+.quotes td { padding: 9px 8px; border-bottom: 1px solid rgba(30, 42, 58, 0.65); text-align: right; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13.5px; }
+.quotes td:first-child { text-align: left; font-family: inherit; }
+.quotes tr:last-child td { border-bottom: none; }
+.quotes .stock { font-size: 14px; }
+.quotes .code { display: block; color: var(--muted); font-size: 11px; font-family: "SFMono-Regular", Consolas, monospace; }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.flat { color: var(--muted); }
+.empty { color: var(--muted); font-size: 13px; padding: 14px 0; }
+footer { color: var(--muted); font-size: 11.5px; text-align: center; padding-top: 8px; line-height: 1.8; }
+footer code { color: #b7c7db; }
+#toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px);
+    background: #16233a; color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px; font-size: 13.5px;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+    max-width: calc(100vw - 32px); z-index: 20;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.err { border-color: rgba(255, 90, 95, 0.5); color: #ffd2d4; }
+@media (max-width: 560px) {
+    .status-grid { grid-template-columns: 1fr; }
+    .wrap { padding: 16px 12px 32px; }
+    .chip { display: none; }
+    .row > .tight { flex: 1 1 100%; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header>
+        <div class="logo" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M4 18V9M8 18V5M12 18v-6M16 18V7M20 18v-4" stroke="#eaf4ff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M3 21h18" stroke="#9cc6ff" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div>
+            <h1>股票盯盘</h1>
+            <div class="sub">FoloToy AI Passport · 设备配置页</div>
+        </div>
+        <div class="chip" id="chipAp">FoloStock-</div>
+    </header>
+
+    <div class="banner" id="firstRun">
+        设备还没有可用配置。先连接下方 Wi-Fi，再添加自选股；保存后屏幕会自动显示行情。
+    </div>
+
+    <section class="card">
+        <h2>运行状态</h2>
+        <div class="status-grid">
+            <div class="status-item">
+                <div class="k">网络</div>
+                <div class="v" id="wifiState">读取中</div>
+            </div>
+            <div class="status-item">
+                <div class="k">配网热点</div>
+                <div class="v" id="apState">读取中</div>
+            </div>
+            <div class="status-item">
+                <div class="k">行情</div>
+                <div class="v" id="quoteState">读取中</div>
+            </div>
+        </div>
+        <div class="actions" id="portalActions" style="display:none">
+            <button class="ghost" id="closePortal" type="button">收起屏幕上的配网引导</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Wi-Fi 配网</h2>
+        <label class="field">
+            <span>Wi-Fi 名称（SSID）</span>
+            <input id="ssid" autocomplete="off" maxlength="31" placeholder="输入或从下方选择">
+        </label>
+        <label class="field">
+            <span>Wi-Fi 密码</span>
+            <input id="pass" type="password" autocomplete="off" maxlength="63" placeholder="开放网络可留空">
+        </label>
+        <div class="actions">
+            <button class="primary" id="wifiSave" type="button">保存并连接</button>
+            <button class="ghost" id="scanBtn" type="button">扫描附近网络</button>
+            <button class="danger" id="forgetBtn" type="button">清除 Wi-Fi</button>
+        </div>
+        <div class="hint">热点默认开启，可在设备上长按 OK 菜单关闭；关闭后请在同一个 Wi-Fi 下用设备 IP 访问本页。</div>
+        <div class="networks" id="networks"></div>
+    </section>
+
+    <section class="card">
+        <h2>自选股</h2>
+        <label class="field">
+            <span>股票代码（最多 8 只，用逗号或换行分隔）</span>
+            <textarea id="codes" spellcheck="false" placeholder="600519, 000001, sh000001, 510300"></textarea>
+        </label>
+        <div class="row">
+            <label class="field grow" style="margin-bottom:0">
+                <span>自动刷新间隔（秒）</span>
+                <input id="interval" type="number" min="3" max="300" step="1" value="5">
+            </label>
+            <div class="tight">
+                <button class="primary" id="stocksSave" type="button" style="width:100%">保存自选股</button>
+            </div>
+        </div>
+        <div class="hint">支持 6 位代码（600519 → sh600519）或带交易所前缀的代码。指数请写 sh000001、sz399001。</div>
+        <table class="quotes">
+            <thead>
+                <tr><th>名称 / 代码</th><th>现价</th><th>涨跌额</th><th>涨跌幅</th></tr>
+            </thead>
+            <tbody id="quoteRows">
+                <tr><td colspan="4" class="empty">还没有行情数据</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <footer>
+        行情来自新浪财经，设备按设置间隔自动刷新。<br>
+        热点名称与地址：<code id="footAp">FoloStock-</code> · <code>192.168.4.1</code>
+    </footer>
+</div>
+<div id="toast" role="status"></div>
+
+<script>
+(function () {
+    "use strict";
+
+    var state = { initialized: false, busy: false, timer: null };
+
+    function $(id) { return document.getElementById(id); }
+
+    function esc(value) {
+        return String(value == null ? "" : value)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function toast(message, isError) {
+        var node = $("toast");
+        node.textContent = message;
+        node.className = "show" + (isError ? " err" : "");
+        window.clearTimeout(node._timer);
+        node._timer = window.setTimeout(function () { node.className = ""; }, 3200);
+    }
+
+    function api(path, options) {
+        var opts = options || {};
+        return fetch(path, {
+            method: opts.method || "GET",
+            headers: opts.body ? { "Content-Type": "application/json" } : {},
+            body: opts.body ? JSON.stringify(opts.body) : undefined,
+            cache: "no-store"
+        }).then(function (response) {
+            return response.text().then(function (text) {
+                var data = {};
+                try { data = text ? JSON.parse(text) : {}; } catch (err) { data = {}; }
+                if (!response.ok) {
+                    throw new Error(data.error || ("请求失败 (" + response.status + ")"));
+                }
+                return data;
+            });
+        });
+    }
+
+    function setBadge(node, text, cls) {
+        node.innerHTML = '<span class="badge ' + cls + '">' + esc(text) + "</span>";
+    }
+
+    function renderStatus(data) {
+        $("chipAp").textContent = data.device.ap_enabled === false
+            ? "热点已关闭" : data.device.ap_ssid;
+        $("footAp").textContent = data.device.ap_ssid;
+        $("firstRun").className = "banner" + (data.configured ? "" : " show");
+
+        var wifi = data.wifi;
+        var wifiNode = $("wifiState");
+        if (wifi.connected) {
+            wifiNode.innerHTML = esc(wifi.ssid || "已连接") +
+                '<span class="small">IP ' + esc(wifi.ip) + " · 信号 " + esc(wifi.rssi) + " dBm</span>";
+        } else if (wifi.configured) {
+            wifiNode.innerHTML = '<span class="badge wait">连接中</span>' +
+                '<span class="small">' + esc(wifi.ssid) + (wifi.fail_count ? " · 失败 " + wifi.fail_count + " 次" : "") + "</span>";
+        } else {
+            wifiNode.innerHTML = '<span class="badge bad">未配置</span><span class="small">请在下方选择 Wi-Fi</span>';
+        }
+
+        var apNode = $("apState");
+        if (data.device.ap_enabled === false) {
+            apNode.innerHTML = '<span class="badge bad">已关闭</span>' +
+                '<span class="small">长按 OK 打开菜单开启</span>';
+        } else {
+            apNode.innerHTML = esc(data.device.ap_ssid) +
+                '<span class="small">' + esc(data.device.ap_ip) + "</span>";
+        }
+
+        var quotes = data.quotes;
+        var quoteNode = $("quoteState");
+        if (quotes.error) {
+            setBadge(quoteNode, quotes.error, "bad");
+        } else if (quotes.last_ok) {
+            setBadge(quoteNode, "正常 · " + quotes.updated_age + " 秒前", "ok");
+        } else {
+            setBadge(quoteNode, "等待行情", "wait");
+        }
+
+        $("portalActions").style.display = (wifi.portal && wifi.configured) ? "flex" : "none";
+
+        if (!state.initialized) {
+            $("ssid").value = wifi.ssid || "";
+            $("codes").value = data.config.codes_text || "";
+            $("interval").value = data.config.interval || 5;
+            state.initialized = true;
+        }
+
+        renderQuotes(quotes.items || []);
+    }
+
+    function renderQuotes(items) {
+        var body = $("quoteRows");
+        if (!items.length) {
+            body.innerHTML = '<tr><td colspan="4" class="empty">还没有行情数据</td></tr>';
+            return;
+        }
+        var html = "";
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var cls = item.trend === "up" ? "up" : (item.trend === "down" ? "down" : "flat");
+            html += "<tr>" +
+                '<td><span class="stock">' + esc(item.name || "等待行情") + "</span>" +
+                '<span class="code">' + esc(item.code) + "</span></td>" +
+                '<td class="' + cls + '">' + esc(item.price) + "</td>" +
+                '<td class="' + cls + '">' + esc(item.change) + "</td>" +
+                '<td class="' + cls + '">' + esc(item.pct) + "</td>" +
+                "</tr>";
+        }
+        body.innerHTML = html;
+    }
+
+    function schedule(delay) {
+        window.clearTimeout(state.timer);
+        state.timer = window.setTimeout(poll, delay || 2000);
+    }
+
+    function poll() {
+        api("/api/status").then(function (data) {
+            renderStatus(data);
+        }).catch(function (err) {
+            setBadge($("quoteState"), "设备离线", "bad");
+            if (err && err.message) { /* keep last data visible */ }
+        }).then(function () {
+            schedule(2000);
+        });
+    }
+
+    function busy(button, isBusy) {
+        state.busy = isBusy;
+        if (button) { button.disabled = isBusy; }
+    }
+
+    function saveWifi() {
+        var ssid = $("ssid").value.trim();
+        if (!ssid) { toast("请先选择或输入 Wi-Fi 名称", true); return; }
+        busy($("wifiSave"), true);
+        api("/api/wifi", { method: "POST", body: { ssid: ssid, pass: $("pass").value } })
+            .then(function () {
+                toast("已提交，正在连接 " + ssid);
+                $("networks").className = "networks";
+                schedule(600);
+            })
+            .catch(function (err) { toast(err.message, true); })
+            .then(function () { busy($("wifiSave"), false); });
+    }
+
+    function saveStocks() {
+        var codes = $("codes").value.trim();
+        var interval = parseInt($("interval").value, 10);
+        if (!codes) { toast("请至少填写一只股票", true); return; }
+        if (!interval || interval < 3 || interval > 300) { toast("刷新间隔需在 3 到 300 秒之间", true); return; }
+        busy($("stocksSave"), true);
+        api("/api/config", { method: "POST", body: { codes: codes, interval: interval } })
+            .then(function (data) {
+                $("codes").value = data.config.codes_text;
+                $("interval").value = data.config.interval;
+                toast("已保存，设备开始刷新行情");
+                schedule(500);
+            })
+            .catch(function (err) { toast(err.message, true); })
+            .then(function () { busy($("stocksSave"), false); });
+    }
+
+    function scan() {
+        busy($("scanBtn"), true);
+        $("scanBtn").textContent = "扫描中...";
+        api("/api/scan").then(function (data) {
+            var list = $("networks");
+            var items = data.networks || [];
+            if (!items.length) {
+                list.innerHTML = '<div class="net"><span class="name">没有扫描到网络</span></div>';
+            } else {
+                var html = "";
+                for (var i = 0; i < items.length; i++) {
+                    var net = items[i];
+                    var level = net.rssi >= -60 ? "强" : (net.rssi >= -75 ? "中" : "弱");
+                    html += '<div class="net" data-ssid="' + esc(net.ssid) + '">' +
+                        '<span class="name">' + esc(net.ssid || "(隐藏网络)") + "</span>" +
+                        '<span class="meta">' + (net.secure ? "加密" : "开放") + " · 信号" + level + "</span>" +
+                        "</div>";
+                }
+                list.innerHTML = html;
+                var rows = list.querySelectorAll(".net[data-ssid]");
+                for (var j = 0; j < rows.length; j++) {
+                    rows[j].addEventListener("click", function () {
+                        $("ssid").value = this.getAttribute("data-ssid");
+                        $("networks").className = "networks";
+                        $("pass").focus();
+                    });
+                }
+            }
+            list.className = "networks show";
+        }).catch(function (err) {
+            toast(err.message, true);
+        }).then(function () {
+            busy($("scanBtn"), false);
+            $("scanBtn").textContent = "扫描附近网络";
+        });
+    }
+
+    function forgetWifi() {
+        if (!window.confirm("清除设备保存的 Wi-Fi 后将重新进入配网模式，确定吗？")) return;
+        api("/api/wifi/forget", { method: "POST", body: {} })
+            .then(function () {
+                $("ssid").value = "";
+                $("pass").value = "";
+                toast("已清除 Wi-Fi");
+                schedule(500);
+            })
+            .catch(function (err) { toast(err.message, true); });
+    }
+
+    function closePortal() {
+        api("/api/portal/close", { method: "POST", body: {} })
+            .then(function () {
+                toast("已收起屏幕上的配网引导");
+                schedule(500);
+            })
+            .catch(function (err) { toast(err.message, true); });
+    }
+
+    $("wifiSave").addEventListener("click", saveWifi);
+    $("stocksSave").addEventListener("click", saveStocks);
+    $("scanBtn").addEventListener("click", scan);
+    $("forgetBtn").addEventListener("click", forgetWifi);
+    $("closePortal").addEventListener("click", closePortal);
+
+    poll();
+})();
+</script>
+</body>
+</html>
