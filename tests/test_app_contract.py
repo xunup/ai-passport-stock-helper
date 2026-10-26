@@ -72,6 +72,16 @@ class AppWiringTest(unittest.TestCase):
         self.assertIn("wifi_app_start(s_config.ssid, s_config.pass, s_ap_enabled)",
                       self.controller)
 
+    def test_web_settings_sync_into_controller_state(self) -> None:
+        self.assertIn("s_brightness = next.brightness", self.controller)
+        self.assertIn("s_auto_off_enabled = next.auto_off_enabled", self.controller)
+        self.assertIn("s_ap_enabled = next.ap_enabled", self.controller)
+        self.assertIn("s_menu.ap_enabled = s_ap_enabled", self.controller)
+
+    def test_brightness_defaults_to_level_three(self) -> None:
+        limits = read("main/settings_limits.h")
+        self.assertIn("#define SETTINGS_BRIGHTNESS_DEFAULT 3", limits)
+
     def test_long_press_opens_settings_menu(self) -> None:
         self.assertIn("menu_model_activate", self.controller)
         self.assertIn("menu_model_move", self.controller)

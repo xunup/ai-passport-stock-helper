@@ -2,6 +2,7 @@
 #include "ui_app.h"
 
 #include "bsp_display.h"
+#include "menu_model.h"
 #include "quote_format.h"
 
 #include "lvgl.h"
@@ -17,6 +18,10 @@ LV_FONT_DECLARE(lv_font_montserrat_20);
 #define COLOR_BG 0x070B12
 #define COLOR_PANEL 0x101824
 #define COLOR_PANEL_SELECTED 0x1A2B45
+#define COLOR_MENU_ROW_SELECTED 0x1E4C7D
+#define COLOR_MENU_ROW_EDITING 0x14532D
+#define COLOR_EDIT 0x2FD07A
+#define COLOR_SWITCH_OFF 0x2A3A50
 #define COLOR_LINE 0x1E2A3A
 #define COLOR_TEXT 0xE6EDF3
 #define COLOR_MUTED 0x8A97A8
@@ -34,12 +39,19 @@ LV_FONT_DECLARE(lv_font_montserrat_20);
 #define RIGHT_LEFT 104
 #define RIGHT_WIDTH 108
 
-#define MENU_ROW_COUNT 3
-#define MENU_ROW_TOP 52
-#define MENU_ROW_HEIGHT 62
-#define MENU_ROW_GAP 6
+#define MENU_ROW_COUNT MENU_ITEM_COUNT
+#define MENU_ROW_TOP 50
+#define MENU_ROW_HEIGHT 50
+#define MENU_ROW_GAP 5
 #define MENU_ROW_WIDTH 216
 #define MENU_ROW_LEFT 12
+#define MENU_ROW_TEXT_LEFT 16
+#define MENU_ROW_VALUE_LEFT 90
+#define MENU_ROW_VALUE_WIDTH 110
+#define SWITCH_WIDTH 44
+#define SWITCH_HEIGHT 24
+#define SWITCH_LEFT 156
+#define SWITCH_KNOB 18
 #define BRIGHTNESS_BAR_COUNT 5
 
 typedef struct {
@@ -60,9 +72,12 @@ typedef struct {
 
 typedef struct {
     lv_obj_t *row;
+    lv_obj_t *marker;
     lv_obj_t *name;
     lv_obj_t *sub;
     lv_obj_t *value;
+    lv_obj_t *track;
+    lv_obj_t *knob;
     lv_obj_t *bars[BRIGHTNESS_BAR_COUNT];
 } menu_row_widgets_t;
 
@@ -190,44 +205,54 @@ void ui_app_init(void)
                               12, 284, 216, 24, "");
     lv_obj_set_style_text_align(s_setup_hint, LV_TEXT_ALIGN_LEFT, 0);
 
-    // 设置菜单:三行卡片,选中行高亮,亮度行带五段背光指示。
+    // 设置菜单:四行卡片,选中行整块高亮并带左侧强调条;开关行用拨动开关。
     s_menu_chrome.screen = make_screen();
     build_header(&s_menu_chrome, "设置");
 
     static const char *const menu_names[MENU_ROW_COUNT] = {
-        "热点开关", "屏幕亮度", "自动息屏",
+        "热点开关", "屏幕亮度", "自动息屏", "息屏时间",
     };
     static const char *const menu_subs[MENU_ROW_COUNT] = {
-        "192.168.4.1", "", "5-60 秒",
+        "192.168.4.1", "", "屏幕到时自动熄灭", "5-60 秒",
     };
     for (int i = 0; i < MENU_ROW_COUNT; i++) {
         menu_row_widgets_t *row = &s_menu_rows[i];
         row->row = make_box(s_menu_chrome.screen, MENU_ROW_LEFT,
                             MENU_ROW_TOP + i * (MENU_ROW_HEIGHT + MENU_ROW_GAP),
-                            MENU_ROW_WIDTH, MENU_ROW_HEIGHT, COLOR_BG, 10);
-        lv_obj_set_style_border_width(row->row, 1, 0);
-        lv_obj_set_style_border_color(row->row, lv_color_hex(COLOR_ACCENT), 0);
-        lv_obj_set_style_border_opa(row->row, LV_OPA_TRANSP, 0);
+                            MENU_ROW_WIDTH, MENU_ROW_HEIGHT, COLOR_PANEL, 10);
+        lv_obj_set_style_border_width(row->row, 2, 0);
+        lv_obj_set_style_border_color(row->row, lv_color_hex(COLOR_LINE), 0);
+        lv_obj_set_style_border_opa(row->row, LV_OPA_COVER, 0);
 
-        row->name = make_label(row->row, &lv_font_cn_16, COLOR_TEXT, 12, 5, 120, 22,
-                               menu_names[i]);
-        row->value = make_label(row->row, &lv_font_cn_16, COLOR_TEXT, 96, 5, 108, 22, "");
+        row->marker = make_box(row->row, 6, 10, 4, 30, COLOR_ACCENT, 2);
+        lv_obj_add_flag(row->marker, LV_OBJ_FLAG_HIDDEN);
+
+        row->name = make_label(row->row, &lv_font_cn_16, COLOR_MUTED, MENU_ROW_TEXT_LEFT, 4,
+                               120, 22, menu_names[i]);
+        row->sub = make_label(row->row, &lv_font_cn_16, COLOR_MUTED, MENU_ROW_TEXT_LEFT, 26,
+                              180, 18, menu_subs[i]);
+        row->value = make_label(row->row, &lv_font_cn_16, COLOR_TEXT, MENU_ROW_VALUE_LEFT, 4,
+                                MENU_ROW_VALUE_WIDTH, 22, "");
         lv_obj_set_style_text_align(row->value, LV_TEXT_ALIGN_RIGHT, 0);
-        row->sub = make_label(row->row, &lv_font_cn_16, COLOR_MUTED, 12, 30, 192, 18,
-                              menu_subs[i]);
 
-        if (i == 1) {
+        if (i == MENU_ITEM_BRIGHTNESS) {
             for (int bar = 0; bar < BRIGHTNESS_BAR_COUNT; bar++) {
-                row->bars[bar] = make_box(row->row, 12 + bar * 20, 40, 16, 6,
+                row->bars[bar] = make_box(row->row, MENU_ROW_TEXT_LEFT + bar * 20, 36, 16, 6,
                                           COLOR_LINE, 3);
             }
+        } else if (i == MENU_ITEM_HOTSPOT || i == MENU_ITEM_AUTO_OFF) {
+            row->track = make_box(row->row, SWITCH_LEFT, (MENU_ROW_HEIGHT - SWITCH_HEIGHT) / 2,
+                                  SWITCH_WIDTH, SWITCH_HEIGHT, COLOR_SWITCH_OFF,
+                                  SWITCH_HEIGHT / 2);
+            row->knob = make_box(row->track, 3, 3, SWITCH_KNOB, SWITCH_KNOB,
+                                 COLOR_MUTED, SWITCH_KNOB / 2);
         }
     }
 
-    make_label(s_menu_chrome.screen, &lv_font_cn_16, COLOR_MUTED, 12, 258, 216, 20,
+    make_label(s_menu_chrome.screen, &lv_font_cn_16, COLOR_MUTED, 12, 270, 216, 20,
                "长按 OK 关闭菜单");
     s_menu_hint = make_label(s_menu_chrome.screen, &lv_font_cn_16, COLOR_ACCENT,
-                             12, 284, 216, 24, "上下选择  OK 调整");
+                             12, 292, 216, 22, "上下选择  OK 调整");
 
     s_active = s_list_chrome.screen;
     lv_screen_load(s_active);
@@ -368,13 +393,33 @@ void ui_app_update_setup(const ui_setup_view_t *view)
     bsp_lvgl_unlock();
 }
 
-static void set_menu_row_selected(int index, bool selected)
+static void set_menu_switch(menu_row_widgets_t *row, bool on)
+{
+    if (!row->track) return;
+    lv_obj_set_style_bg_color(row->track,
+                              lv_color_hex(on ? COLOR_ACCENT : COLOR_SWITCH_OFF), 0);
+    lv_obj_set_style_bg_color(row->knob, lv_color_hex(on ? 0xFFFFFF : COLOR_MUTED), 0);
+    lv_obj_set_pos(row->knob, on ? SWITCH_WIDTH - SWITCH_KNOB - 3 : 3, 3);
+}
+
+static void set_menu_row_selected(int index, bool selected, bool editing)
 {
     menu_row_widgets_t *row = &s_menu_rows[index];
-    lv_obj_set_style_bg_color(row->row,
-                              lv_color_hex(selected ? COLOR_PANEL_SELECTED : COLOR_BG), 0);
-    lv_obj_set_style_bg_opa(row->row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_opa(row->row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    const uint32_t bg = editing ? COLOR_MENU_ROW_EDITING
+                                : (selected ? COLOR_MENU_ROW_SELECTED : COLOR_PANEL);
+    lv_obj_set_style_bg_color(row->row, lv_color_hex(bg), 0);
+    lv_obj_set_style_border_color(row->row,
+                                  lv_color_hex(editing ? COLOR_EDIT
+                                                       : (selected ? COLOR_ACCENT : COLOR_LINE)), 0);
+    lv_obj_set_style_bg_color(row->marker,
+                              lv_color_hex(editing ? COLOR_EDIT : COLOR_ACCENT), 0);
+    if (selected) {
+        lv_obj_clear_flag(row->marker, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(row->marker, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_style_text_color(row->name,
+                                lv_color_hex(selected ? COLOR_TEXT : COLOR_MUTED), 0);
 }
 
 void ui_app_update_menu(const ui_menu_view_t *view)
@@ -390,31 +435,36 @@ void ui_app_update_menu(const ui_menu_view_t *view)
         menu_row_widgets_t *row = &s_menu_rows[i];
         const bool selected = i == view->selected;
         const bool editing = selected && view->editing;
-        set_menu_row_selected(i, selected);
+        set_menu_row_selected(i, selected, editing);
 
-        uint32_t value_color = COLOR_TEXT;
+        uint32_t value_color = selected ? COLOR_TEXT : COLOR_MUTED;
+        bool show_value = true;
         char value[16] = "";
 
-        if (i == 0) {
-            snprintf(value, sizeof(value), "%s", view->ap_enabled ? "已开启" : "已关闭");
-            value_color = view->ap_enabled ? COLOR_DOWN : COLOR_MUTED;
+        if (i == MENU_ITEM_HOTSPOT) {
+            show_value = false;
+            set_menu_switch(row, view->ap_enabled);
             lv_label_set_text(row->sub, view->ap_enabled ? "192.168.4.1" : "网页配置不可用");
-        } else if (i == 1) {
+        } else if (i == MENU_ITEM_BRIGHTNESS) {
             snprintf(value, sizeof(value), "%d / %d", brightness, BRIGHTNESS_BAR_COUNT);
+            const uint32_t bar_on = editing ? COLOR_EDIT : COLOR_ACCENT;
             for (int bar = 0; bar < BRIGHTNESS_BAR_COUNT; bar++) {
                 lv_obj_set_style_bg_color(row->bars[bar],
-                                          lv_color_hex(bar < brightness ? COLOR_ACCENT
-                                                                        : COLOR_LINE), 0);
+                                          lv_color_hex(bar < brightness ? bar_on : COLOR_LINE), 0);
             }
+        } else if (i == MENU_ITEM_AUTO_OFF) {
+            show_value = false;
+            set_menu_switch(row, view->auto_off_enabled);
+            lv_label_set_text(row->sub, view->auto_off_enabled ? "屏幕到时自动熄灭"
+                                                               : "屏幕保持常亮");
         } else {
             snprintf(value, sizeof(value), "%d 秒", view->auto_off_sec);
+            if (!view->auto_off_enabled) value_color = COLOR_MUTED;
         }
 
-        lv_label_set_text(row->value, value);
+        lv_label_set_text(row->value, show_value ? value : "");
         lv_obj_set_style_text_color(row->value,
-                                    lv_color_hex(editing ? COLOR_ACCENT : value_color), 0);
-        lv_obj_set_style_text_color(row->name,
-                                    lv_color_hex(selected ? COLOR_TEXT : COLOR_MUTED), 0);
+                                    lv_color_hex(editing ? COLOR_EDIT : value_color), 0);
     }
 
     lv_label_set_text(s_menu_hint, view->editing ? "上下调整  OK 完成"

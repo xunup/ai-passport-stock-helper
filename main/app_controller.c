@@ -50,6 +50,7 @@ static bool s_screen_off;
 static bool s_swallow_wake;
 static int s_brightness;
 static int s_auto_off_sec;
+static bool s_auto_off_enabled;
 static bool s_ap_enabled;
 static int64_t s_last_activity_us;
 
@@ -68,7 +69,7 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user)
     (void)xQueueSend(s_keys, &event, 0);
 }
 
-static bool config_equal(const stock_config_t *a, const stock_config_t *b)
+static bool stock_config_equal(const stock_config_t *a, const stock_config_t *b)
 {
     return a->count == b->count &&
            a->interval_sec == b->interval_sec &&
@@ -77,21 +78,52 @@ static bool config_equal(const stock_config_t *a, const stock_config_t *b)
            memcmp(a->codes, b->codes, sizeof(a->codes)) == 0;
 }
 
+// 网页与设备菜单共用 config_store;本循环同时收敛亮度和热点等菜单设置。
 static bool apply_new_config(void)
 {
     stock_config_t next;
     config_store_get(&next);
-    if (config_equal(&s_config, &next)) return false;
-    s_config = next;
-    ui_model_set_count(&s_model, s_config.count);
-    ESP_LOGI(TAG, "配置更新: %d 只股票, %u 秒", s_config.count, s_config.interval_sec);
-    return true;
+
+    bool changed = false;
+    if (s_config.brightness != next.brightness) {
+        s_brightness = next.brightness;
+        if (!s_screen_off) bsp_display_backlight(brightness_percent(s_brightness));
+        changed = true;
+    }
+    if (s_config.auto_off_sec != next.auto_off_sec) {
+        s_auto_off_sec = next.auto_off_sec;
+        changed = true;
+    }
+    if (s_config.auto_off_enabled != next.auto_off_enabled) {
+        s_auto_off_enabled = next.auto_off_enabled;
+        changed = true;
+    }
+    if (s_config.ap_enabled != next.ap_enabled) {
+        s_ap_enabled = next.ap_enabled;
+        changed = true;
+    }
+    if (!stock_config_equal(&s_config, &next)) {
+        ui_model_set_count(&s_model, next.count);
+        ESP_LOGI(TAG, "配置更新: %d 只股票, %u 秒", next.count, next.interval_sec);
+        changed = true;
+    }
+    if (changed) {
+        s_config = next;
+        if (s_menu_open) {
+            s_menu.brightness = (uint8_t)s_brightness;
+            s_menu.auto_off_sec = (uint8_t)s_auto_off_sec;
+            s_menu.auto_off_enabled = s_auto_off_enabled;
+            s_menu.ap_enabled = s_ap_enabled;
+        }
+    }
+    return changed;
 }
 
 static void persist_display(void)
 {
     const esp_err_t err = config_store_save_display((uint8_t)s_brightness,
-                                                    (uint8_t)s_auto_off_sec);
+                                                    (uint8_t)s_auto_off_sec,
+                                                    s_auto_off_enabled);
     if (err != ESP_OK) ESP_LOGW(TAG, "保存显示设置失败: %s", esp_err_to_name(err));
 }
 
@@ -101,8 +133,11 @@ static void apply_menu_change(menu_change_t change)
         s_brightness = s_menu.brightness;
         bsp_display_backlight(brightness_percent(s_brightness));
         persist_display();
-    } else if (change == MENU_CHANGE_AUTO_OFF) {
+    } else if (change == MENU_CHANGE_AUTO_OFF_TIME) {
         s_auto_off_sec = s_menu.auto_off_sec;
+        persist_display();
+    } else if (change == MENU_CHANGE_AUTO_OFF_ENABLED) {
+        s_auto_off_enabled = s_menu.auto_off_enabled;
         persist_display();
     }
 }
@@ -125,7 +160,8 @@ static void toggle_hotspot(void)
 
 static void open_menu(void)
 {
-    menu_model_init(&s_menu, (uint8_t)s_brightness, (uint8_t)s_auto_off_sec, s_ap_enabled);
+    menu_model_init(&s_menu, (uint8_t)s_brightness, (uint8_t)s_auto_off_sec,
+                    s_auto_off_enabled, s_ap_enabled);
     s_menu_open = true;
     s_last_activity_us = esp_timer_get_time();
 }
@@ -189,6 +225,7 @@ static void render_menu(const wifi_app_info_t *wifi)
         .editing = s_menu.editing,
         .brightness = s_menu.brightness,
         .auto_off_sec = s_menu.auto_off_sec,
+        .auto_off_enabled = s_menu.auto_off_enabled,
         .ap_enabled = s_menu.ap_enabled,
         .wifi_connected = wifi->sta_connected,
         .battery_pct = s_battery_pct,
@@ -291,7 +328,7 @@ static void controller_task(void *arg)
         }
 
         const int64_t now_us = esp_timer_get_time();
-        if (!s_screen_off && s_auto_off_sec > 0 &&
+        if (!s_screen_off && s_auto_off_enabled && s_auto_off_sec > 0 &&
             now_us - s_last_activity_us >= (int64_t)s_auto_off_sec * 1000 * 1000) {
             s_screen_off = true;
             bsp_display_backlight(0);
@@ -333,6 +370,7 @@ esp_err_t app_controller_start(void)
     config_store_get(&s_config);
     s_brightness = s_config.brightness;
     s_auto_off_sec = s_config.auto_off_sec;
+    s_auto_off_enabled = s_config.auto_off_enabled;
     s_ap_enabled = s_config.ap_enabled;
     ui_model_init(&s_model, s_config.count);
 

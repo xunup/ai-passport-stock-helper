@@ -78,6 +78,9 @@ static void add_config(cJSON *parent, const char *name, const stock_config_t *cf
     if (!object) return;
     cJSON_AddStringToObject(object, "codes_text", joined);
     cJSON_AddNumberToObject(object, "interval", cfg->interval_sec);
+    cJSON_AddNumberToObject(object, "brightness", cfg->brightness);
+    cJSON_AddNumberToObject(object, "auto_off_sec", cfg->auto_off_sec);
+    cJSON_AddBoolToObject(object, "auto_off_enabled", cfg->auto_off_enabled);
     cJSON_AddStringToObject(object, "ssid", cfg->ssid);
     cJSON_AddBoolToObject(object, "configured", cfg->ssid[0] != '\0' && cfg->count > 0);
     cJSON *codes = cJSON_AddArrayToObject(object, "codes");
@@ -243,6 +246,91 @@ static esp_err_t config_post(httpd_req_t *req)
     return send_json(req, root, NULL);
 }
 
+static esp_err_t settings_post(httpd_req_t *req)
+{
+    char body[MAX_BODY];
+    if (read_body(req, body, sizeof(body)) != ESP_OK) {
+        return send_error(req, "400 Bad Request", "请求体过大或为空");
+    }
+    cJSON *json = cJSON_Parse(body);
+    if (!json) return send_error(req, "400 Bad Request", "JSON 格式不正确");
+
+    stock_config_t current;
+    config_store_get(&current);
+    int brightness = current.brightness;
+    int auto_off_sec = current.auto_off_sec;
+    bool auto_off_enabled = current.auto_off_enabled;
+    bool ap_enabled = current.ap_enabled;
+
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(json, "brightness");
+    if (item) {
+        if (!cJSON_IsNumber(item) || item->valueint < STOCK_CONFIG_BRIGHTNESS_MIN ||
+            item->valueint > STOCK_CONFIG_BRIGHTNESS_MAX) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "亮度需在 1 到 5 档之间");
+        }
+        brightness = item->valueint;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(json, "auto_off_sec");
+    if (item) {
+        if (!cJSON_IsNumber(item) || item->valueint < STOCK_CONFIG_AUTO_OFF_MIN ||
+            item->valueint > STOCK_CONFIG_AUTO_OFF_MAX ||
+            item->valueint % STOCK_CONFIG_AUTO_OFF_STEP != 0) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "息屏时间需为 5 到 60 秒之间的 5 秒倍数");
+        }
+        auto_off_sec = item->valueint;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(json, "auto_off_enabled");
+    if (item) {
+        if (!cJSON_IsBool(item)) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "自动息屏开关必须是布尔值");
+        }
+        auto_off_enabled = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(json, "ap_enabled");
+    if (item) {
+        if (!cJSON_IsBool(item)) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "热点开关必须是布尔值");
+        }
+        ap_enabled = cJSON_IsTrue(item);
+    }
+    cJSON_Delete(json);
+
+    const bool ap_changed = ap_enabled != current.ap_enabled;
+    if (ap_changed) {
+        const esp_err_t ap_err = wifi_app_set_ap_enabled(ap_enabled);
+        if (ap_err != ESP_OK) {
+            ESP_LOGW(TAG, "网页切换热点失败: %s", esp_err_to_name(ap_err));
+            return send_error(req, "500 Internal Server Error", "无法切换配网热点");
+        }
+    }
+
+    esp_err_t err = config_store_save_display((uint8_t)brightness, (uint8_t)auto_off_sec,
+                                              auto_off_enabled);
+    if (err == ESP_OK && ap_changed) {
+        err = config_store_save_ap_enabled(ap_enabled);
+    }
+    if (err != ESP_OK) {
+        if (ap_changed) (void)wifi_app_set_ap_enabled(current.ap_enabled);
+        ESP_LOGE(TAG, "网页保存设备设置失败: %s", esp_err_to_name(err));
+        return send_error(req, "500 Internal Server Error", "保存设备设置失败，请重试");
+    }
+    ESP_LOGI(TAG, "网页设置: 亮度 %d, 自动息屏 %s, %d 秒, 热点 %s", brightness,
+             auto_off_enabled ? "开" : "关", auto_off_sec, ap_enabled ? "开" : "关");
+
+    stock_config_t saved;
+    config_store_get(&saved);
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return ESP_ERR_NO_MEM;
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddBoolToObject(root, "ap_enabled", wifi_app_ap_enabled());
+    add_config(root, "config", &saved);
+    return send_json(req, root, NULL);
+}
+
 static esp_err_t wifi_post(httpd_req_t *req)
 {
     char body[MAX_BODY];
@@ -360,7 +448,7 @@ esp_err_t web_server_start(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 10;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
     config.recv_wait_timeout = 5;
@@ -376,6 +464,8 @@ esp_err_t web_server_start(void)
     if (err == ESP_OK) err = register_handler(s_server, "/api/status", HTTP_GET, status_get);
     if (err == ESP_OK) err = register_handler(s_server, "/api/config", HTTP_GET, config_get);
     if (err == ESP_OK) err = register_handler(s_server, "/api/config", HTTP_POST, config_post);
+    if (err == ESP_OK) err = register_handler(s_server, "/api/settings", HTTP_POST,
+                                              settings_post);
     if (err == ESP_OK) err = register_handler(s_server, "/api/scan", HTTP_GET, scan_get);
     if (err == ESP_OK) err = register_handler(s_server, "/api/wifi", HTTP_POST, wifi_post);
     if (err == ESP_OK) err = register_handler(s_server, "/api/wifi/forget", HTTP_POST,

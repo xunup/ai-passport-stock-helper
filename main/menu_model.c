@@ -1,4 +1,4 @@
-// main/menu_model.c —— 三行设置菜单的纯逻辑,不依赖 LVGL/ESP-IDF。
+// main/menu_model.c —— 四行设置菜单的纯逻辑,不依赖 LVGL/ESP-IDF。
 #include "menu_model.h"
 
 #include "settings_limits.h"
@@ -18,13 +18,14 @@ static uint8_t clamp_auto_off(int value)
 }
 
 void menu_model_init(menu_model_t *model, uint8_t brightness, uint8_t auto_off_sec,
-                     bool ap_enabled)
+                     bool auto_off_enabled, bool ap_enabled)
 {
     if (!model) return;
     model->selected = MENU_ITEM_HOTSPOT;
     model->editing = false;
     model->brightness = clamp_level(brightness);
     model->auto_off_sec = clamp_auto_off(auto_off_sec);
+    model->auto_off_enabled = auto_off_enabled;
     model->ap_enabled = ap_enabled;
 }
 
@@ -38,11 +39,11 @@ menu_change_t menu_model_move(menu_model_t *model, int delta)
             model->brightness = clamp_level((int)model->brightness + delta);
             return model->brightness != before ? MENU_CHANGE_BRIGHTNESS : MENU_CHANGE_NONE;
         }
-        if (model->selected == MENU_ITEM_AUTO_OFF) {
+        if (model->selected == MENU_ITEM_AUTO_OFF_TIME) {
             const uint8_t before = model->auto_off_sec;
             model->auto_off_sec = clamp_auto_off(
                 (int)model->auto_off_sec + delta * SETTINGS_AUTO_OFF_STEP);
-            return model->auto_off_sec != before ? MENU_CHANGE_AUTO_OFF : MENU_CHANGE_NONE;
+            return model->auto_off_sec != before ? MENU_CHANGE_AUTO_OFF_TIME : MENU_CHANGE_NONE;
         }
         return MENU_CHANGE_NONE;
     }
@@ -71,8 +72,12 @@ menu_activate_t menu_model_activate(menu_model_t *model)
         return MENU_ACTIVATE_EDIT_BRIGHTNESS;
     }
     if (model->selected == MENU_ITEM_AUTO_OFF) {
+        model->auto_off_enabled = !model->auto_off_enabled;
+        return MENU_ACTIVATE_TOGGLE_AUTO_OFF;
+    }
+    if (model->selected == MENU_ITEM_AUTO_OFF_TIME) {
         model->editing = true;
-        return MENU_ACTIVATE_EDIT_AUTO_OFF;
+        return MENU_ACTIVATE_EDIT_AUTO_OFF_TIME;
     }
     return MENU_ACTIVATE_NONE;
 }

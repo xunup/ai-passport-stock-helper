@@ -28,9 +28,10 @@ typedef struct {
     int count;
     char codes[STOCK_CODES_MAX][STOCK_CODE_LEN];
     uint16_t interval_sec;
-    // 设备菜单设置:背光档位 1-5、自动息屏秒数(5-60,5 秒一档)、配网热点开关。
+    // 设备菜单设置:背光档位 1-5、自动息屏开关与秒数(5-60,5 秒一档)、配网热点开关。
     uint8_t brightness;
     uint8_t auto_off_sec;
+    bool auto_off_enabled;
     bool ap_enabled;
 } stock_config_t;
 
@@ -47,5 +48,6 @@ esp_err_t config_store_save_wifi(const char *ssid, const char *pass);
 esp_err_t config_store_forget_wifi(void);
 
 // 保存设备菜单设置;越界值会被夹到有效范围,自动息屏按 5 秒对齐。
-esp_err_t config_store_save_display(uint8_t brightness, uint8_t auto_off_sec);
+esp_err_t config_store_save_display(uint8_t brightness, uint8_t auto_off_sec,
+                                    bool auto_off_enabled);
 esp_err_t config_store_save_ap_enabled(bool enabled);

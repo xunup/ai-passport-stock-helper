@@ -6,22 +6,25 @@
 static void test_init_clamps(void)
 {
     menu_model_t model;
-    menu_model_init(&model, 0, 7, true);
+    menu_model_init(&model, 0, 7, true, true);
     assert(model.selected == MENU_ITEM_HOTSPOT);
     assert(!model.editing);
     assert(model.brightness == 1);
     assert(model.auto_off_sec == 5);
+    assert(model.auto_off_enabled);
+    assert(model.ap_enabled);
 
-    menu_model_init(&model, 9, 61, false);
+    menu_model_init(&model, 9, 61, false, false);
     assert(model.brightness == 5);
     assert(model.auto_off_sec == 60);
+    assert(!model.auto_off_enabled);
     assert(!model.ap_enabled);
 }
 
 static void test_selection(void)
 {
     menu_model_t model;
-    menu_model_init(&model, 3, 30, true);
+    menu_model_init(&model, 3, 30, true, true);
 
     assert(menu_model_move(&model, -1) == MENU_CHANGE_NONE);
     assert(model.selected == MENU_ITEM_HOTSPOT);
@@ -30,26 +33,43 @@ static void test_selection(void)
     assert(model.selected == MENU_ITEM_BRIGHTNESS);
     assert(menu_model_move(&model, 1) == MENU_CHANGE_SELECTION);
     assert(model.selected == MENU_ITEM_AUTO_OFF);
+    assert(menu_model_move(&model, 1) == MENU_CHANGE_SELECTION);
+    assert(model.selected == MENU_ITEM_AUTO_OFF_TIME);
     assert(menu_model_move(&model, 1) == MENU_CHANGE_NONE);
-    assert(model.selected == MENU_ITEM_AUTO_OFF);
+    assert(model.selected == MENU_ITEM_AUTO_OFF_TIME);
     assert(menu_model_move(&model, -1) == MENU_CHANGE_SELECTION);
-    assert(model.selected == MENU_ITEM_BRIGHTNESS);
+    assert(model.selected == MENU_ITEM_AUTO_OFF);
 }
 
 static void test_hotspot_toggle(void)
 {
     menu_model_t model;
-    menu_model_init(&model, 3, 30, true);
+    menu_model_init(&model, 3, 30, true, true);
     assert(menu_model_activate(&model) == MENU_ACTIVATE_TOGGLE_HOTSPOT);
     assert(!model.ap_enabled);
+    assert(!model.editing);
     assert(menu_model_activate(&model) == MENU_ACTIVATE_TOGGLE_HOTSPOT);
     assert(model.ap_enabled);
+}
+
+static void test_auto_off_toggle(void)
+{
+    menu_model_t model;
+    menu_model_init(&model, 3, 30, true, true);
+    menu_model_move(&model, 2);
+    assert(model.selected == MENU_ITEM_AUTO_OFF);
+
+    assert(menu_model_activate(&model) == MENU_ACTIVATE_TOGGLE_AUTO_OFF);
+    assert(!model.auto_off_enabled);
+    assert(!model.editing);
+    assert(menu_model_activate(&model) == MENU_ACTIVATE_TOGGLE_AUTO_OFF);
+    assert(model.auto_off_enabled);
 }
 
 static void test_brightness_edit(void)
 {
     menu_model_t model;
-    menu_model_init(&model, 3, 30, true);
+    menu_model_init(&model, 3, 30, true, true);
     menu_model_move(&model, 1);
 
     assert(menu_model_activate(&model) == MENU_ACTIVATE_EDIT_BRIGHTNESS);
@@ -69,21 +89,22 @@ static void test_brightness_edit(void)
     assert(model.selected == MENU_ITEM_AUTO_OFF);
 }
 
-static void test_auto_off_edit_steps(void)
+static void test_auto_off_time_edit_steps(void)
 {
     menu_model_t model;
-    menu_model_init(&model, 3, 30, true);
-    menu_model_move(&model, 2);
-    assert(menu_model_activate(&model) == MENU_ACTIVATE_EDIT_AUTO_OFF);
+    menu_model_init(&model, 3, 30, false, true);
+    menu_model_move(&model, 3);
+    assert(model.selected == MENU_ITEM_AUTO_OFF_TIME);
+    assert(menu_model_activate(&model) == MENU_ACTIVATE_EDIT_AUTO_OFF_TIME);
     assert(model.editing);
 
-    assert(menu_model_move(&model, 1) == MENU_CHANGE_AUTO_OFF);
+    assert(menu_model_move(&model, 1) == MENU_CHANGE_AUTO_OFF_TIME);
     assert(model.auto_off_sec == 35);
-    assert(menu_model_move(&model, 1) == MENU_CHANGE_AUTO_OFF);
+    assert(menu_model_move(&model, 1) == MENU_CHANGE_AUTO_OFF_TIME);
     assert(model.auto_off_sec == 40);
-    assert(menu_model_move(&model, -10) == MENU_CHANGE_AUTO_OFF);
+    assert(menu_model_move(&model, -10) == MENU_CHANGE_AUTO_OFF_TIME);
     assert(model.auto_off_sec == 5);
-    assert(menu_model_move(&model, 20) == MENU_CHANGE_AUTO_OFF);
+    assert(menu_model_move(&model, 20) == MENU_CHANGE_AUTO_OFF_TIME);
     assert(model.auto_off_sec == 60);
     assert(menu_model_move(&model, 1) == MENU_CHANGE_NONE);
 
@@ -95,7 +116,7 @@ static void test_uninitialized_inputs(void)
 {
     assert(menu_model_move(NULL, 1) == MENU_CHANGE_NONE);
     assert(menu_model_activate(NULL) == MENU_ACTIVATE_NONE);
-    menu_model_init(NULL, 3, 30, true);
+    menu_model_init(NULL, 3, 30, true, true);
 }
 
 int main(void)
@@ -103,8 +124,9 @@ int main(void)
     test_init_clamps();
     test_selection();
     test_hotspot_toggle();
+    test_auto_off_toggle();
     test_brightness_edit();
-    test_auto_off_edit_steps();
+    test_auto_off_time_edit_steps();
     test_uninitialized_inputs();
     puts("menu model tests: PASS");
     return 0;

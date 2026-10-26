@@ -16,6 +16,7 @@
 #define KEY_INTERVAL "interval"
 #define KEY_BRIGHTNESS "brightness"
 #define KEY_AUTO_OFF "auto_off"
+#define KEY_AUTO_OFF_ENABLED "auto_off_on"
 #define KEY_AP_ENABLED "ap_enabled"
 
 static SemaphoreHandle_t s_lock;
@@ -59,6 +60,7 @@ static void set_defaults(stock_config_t *cfg)
     cfg->interval_sec = STOCK_CONFIG_INTERVAL_DEFAULT;
     cfg->brightness = STOCK_CONFIG_BRIGHTNESS_DEFAULT;
     cfg->auto_off_sec = STOCK_CONFIG_AUTO_OFF_DEFAULT;
+    cfg->auto_off_enabled = true;
     cfg->ap_enabled = true;
 }
 
@@ -95,6 +97,9 @@ static void load_from_nvs(stock_config_t *cfg)
     }
     if (nvs_get_u8(handle, KEY_AUTO_OFF, &value) == ESP_OK) {
         cfg->auto_off_sec = clamp_auto_off(value);
+    }
+    if (nvs_get_u8(handle, KEY_AUTO_OFF_ENABLED, &value) == ESP_OK) {
+        cfg->auto_off_enabled = value != 0;
     }
     if (nvs_get_u8(handle, KEY_AP_ENABLED, &value) == ESP_OK) {
         cfg->ap_enabled = value != 0;
@@ -222,7 +227,8 @@ esp_err_t config_store_forget_wifi(void)
     return config_store_save_wifi("", "");
 }
 
-esp_err_t config_store_save_display(uint8_t brightness, uint8_t auto_off_sec)
+esp_err_t config_store_save_display(uint8_t brightness, uint8_t auto_off_sec,
+                                    bool auto_off_enabled)
 {
     if (!s_ready) return ESP_ERR_INVALID_STATE;
 
@@ -230,12 +236,16 @@ esp_err_t config_store_save_display(uint8_t brightness, uint8_t auto_off_sec)
     stock_config_t next = s_config;
     next.brightness = clamp_brightness(brightness);
     next.auto_off_sec = clamp_auto_off(auto_off_sec);
+    next.auto_off_enabled = auto_off_enabled;
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &handle);
     if (err == ESP_OK) {
         err = nvs_set_u8(handle, KEY_BRIGHTNESS, next.brightness);
         if (err == ESP_OK) err = nvs_set_u8(handle, KEY_AUTO_OFF, next.auto_off_sec);
+        if (err == ESP_OK) {
+            err = nvs_set_u8(handle, KEY_AUTO_OFF_ENABLED, auto_off_enabled ? 1 : 0);
+        }
         if (err == ESP_OK) err = nvs_commit(handle);
         nvs_close(handle);
     }

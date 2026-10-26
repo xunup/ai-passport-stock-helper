@@ -30,6 +30,7 @@ typedef struct {
     bool editing;
     int brightness;
     int auto_off_sec;
+    bool auto_off_enabled;
     bool ap_enabled;
     bool wifi_connected;
     int battery_pct;

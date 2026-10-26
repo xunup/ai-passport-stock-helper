@@ -82,7 +82,7 @@ h1 { font-size: 21px; margin: 0; letter-spacing: 0.5px; }
 .badge.wait { color: var(--warn); background: rgba(245, 197, 66, 0.12); }
 label.field { display: block; margin-bottom: 12px; }
 label.field span { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 6px; }
-input, textarea {
+input, textarea, select {
     width: 100%; color: var(--text);
     background: var(--panel-2);
     border: 1px solid var(--line);
@@ -93,7 +93,7 @@ input, textarea {
     outline: none;
     transition: border-color 0.15s, box-shadow 0.15s;
 }
-input:focus, textarea:focus {
+input:focus, textarea:focus, select:focus {
     border-color: rgba(74, 158, 255, 0.7);
     box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.12);
 }
@@ -101,6 +101,24 @@ textarea { resize: vertical; min-height: 74px; font-family: "SFMono-Regular", Co
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
 .row > .grow { flex: 1 1 210px; }
 .row > .tight { flex: 0 0 130px; }
+select:disabled { opacity: 0.55; }
+.setting-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(30, 42, 58, 0.65); }
+.setting-row .text { flex: 1 1 auto; min-width: 0; }
+.setting-row .title { font-size: 14px; }
+.setting-row .desc { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+.setting-row .value { flex: 0 0 auto; color: var(--accent); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+input[type="range"] {
+    flex: 0 0 128px; width: 128px; height: 26px;
+    padding: 0; border: none; background: transparent; box-shadow: none;
+    accent-color: var(--accent); cursor: pointer;
+}
+.switch { position: relative; display: inline-block; flex: 0 0 auto; width: 44px; height: 24px; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: none; opacity: 0; cursor: pointer; }
+.switch .track { position: absolute; inset: 0; border-radius: 999px; background: #263448; transition: background 0.15s; pointer-events: none; }
+.switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(20px); background: #fff; }
+.switch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.25); }
 button {
     border: 1px solid transparent; border-radius: 10px;
     padding: 10px 15px; font-size: 14px; font-family: inherit;
@@ -210,8 +228,60 @@ footer code { color: #b7c7db; }
             <button class="ghost" id="scanBtn" type="button">扫描附近网络</button>
             <button class="danger" id="forgetBtn" type="button">清除 Wi-Fi</button>
         </div>
-        <div class="hint">热点默认开启，可在设备上长按 OK 菜单关闭；关闭后请在同一个 Wi-Fi 下用设备 IP 访问本页。</div>
+        <div class="hint">热点开关在下方“设备设置”中；关闭后请在同一个 Wi-Fi 下用设备 IP 访问本页。</div>
         <div class="networks" id="networks"></div>
+    </section>
+
+    <section class="card">
+        <h2>设备设置</h2>
+        <div class="setting-row">
+            <div class="text">
+                <span class="title">屏幕亮度</span>
+                <span class="desc">1 档最暗，5 档最亮</span>
+            </div>
+            <input id="brightness" type="range" min="1" max="5" step="1" value="3" aria-label="屏幕亮度">
+            <span class="value" id="brightnessValue">3 档</span>
+        </div>
+        <div class="setting-row">
+            <div class="text">
+                <span class="title">自动息屏</span>
+                <span class="desc" id="autoOffHint">无操作一段时间后关闭屏幕</span>
+            </div>
+            <label class="switch">
+                <input id="autoOff" type="checkbox" checked aria-label="自动息屏">
+                <span class="track"></span>
+            </label>
+        </div>
+        <label class="field" id="autoOffTimeField" style="margin-top:12px;margin-bottom:0">
+            <span>息屏时间</span>
+            <select id="autoOffTime">
+                <option value="5">5 秒</option>
+                <option value="10">10 秒</option>
+                <option value="15">15 秒</option>
+                <option value="20">20 秒</option>
+                <option value="25">25 秒</option>
+                <option value="30" selected>30 秒</option>
+                <option value="35">35 秒</option>
+                <option value="40">40 秒</option>
+                <option value="45">45 秒</option>
+                <option value="50">50 秒</option>
+                <option value="55">55 秒</option>
+                <option value="60">60 秒</option>
+            </select>
+        </label>
+        <div class="setting-row" style="margin-top:12px">
+            <div class="text">
+                <span class="title">配网热点</span>
+                <span class="desc">关闭后无法通过 192.168.4.1 访问本页，可在设备菜单重新开启</span>
+            </div>
+            <label class="switch">
+                <input id="hotspot" type="checkbox" checked aria-label="配网热点">
+                <span class="track"></span>
+            </label>
+        </div>
+        <div class="actions">
+            <button class="primary" id="settingsSave" type="button">保存设备设置</button>
+        </div>
     </section>
 
     <section class="card">
@@ -251,7 +321,7 @@ footer code { color: #b7c7db; }
 (function () {
     "use strict";
 
-    var state = { initialized: false, busy: false, timer: null };
+    var state = { initialized: false, busy: false, timer: null, settingsDirty: false };
 
     function $(id) { return document.getElementById(id); }
 
@@ -259,6 +329,156 @@ footer code { color: #b7c7db; }
         return String(value == null ? "" : value)
             .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    var CACHE_KEY = "folotoy.stock.form.v1";
+
+    function hasField(object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
+    }
+
+    function readCache() {
+        try {
+            var raw = window.localStorage.getItem(CACHE_KEY);
+            var data = raw ? JSON.parse(raw) : null;
+            return data && typeof data === "object" ? data : {};
+        } catch (err) {
+            return {};
+        }
+    }
+
+    function mergeCache(patch) {
+        patch = patch || {};
+        var current = readCache();
+        var next = {
+            ssid: hasField(patch, "ssid") ? String(patch.ssid) : (current.ssid || ""),
+            pass: hasField(patch, "pass") ? String(patch.pass) : (current.pass || ""),
+            codes: hasField(patch, "codes") ? String(patch.codes) : (current.codes || ""),
+            interval: hasField(patch, "interval") ? Number(patch.interval) : current.interval
+        };
+        var before = {
+            ssid: current.ssid || "",
+            pass: current.pass || "",
+            codes: current.codes || "",
+            interval: current.interval
+        };
+        if (JSON.stringify(next) !== JSON.stringify(before)) {
+            try {
+                window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
+            } catch (err) { /* 存储不可用时保持页面可用 */ }
+        }
+        return next;
+    }
+
+    function restoreForm() {
+        var cache = readCache();
+        if (typeof cache.ssid === "string") { $("ssid").value = cache.ssid; }
+        if (typeof cache.pass === "string") { $("pass").value = cache.pass; }
+        if (typeof cache.codes === "string") { $("codes").value = cache.codes; }
+        if (typeof cache.interval === "number" && cache.interval >= 3 && cache.interval <= 300) {
+            $("interval").value = cache.interval;
+        }
+    }
+
+    // 仅设备回传的实际设置写入缓存;表单中尚未保存的输入不覆盖缓存。
+    function applyDeviceSettings(config) {
+        if (!config) return null;
+        var ssid = typeof config.ssid === "string" ? config.ssid : "";
+        var codes = typeof config.codes_text === "string" ? config.codes_text : "";
+        if (!ssid && !codes) return null;
+        var cached = readCache();
+        var patch = {
+            ssid: ssid,
+            codes: codes,
+            interval: typeof config.interval === "number" ? config.interval : 5
+        };
+        if (cached.pass && cached.ssid && cached.ssid !== ssid) {
+            patch.pass = ""; // 设备 SSID 已更换,旧密码不再适用
+        }
+        mergeCache(patch);
+        return patch;
+    }
+
+    var SETTINGS = {
+        brightnessMin: 1, brightnessMax: 5,
+        autoOffMin: 5, autoOffMax: 60, autoOffStep: 5
+    };
+
+    function settingsInt(value, fallback) {
+        var number = Number(value);
+        return isFinite(number) ? Math.round(number) : fallback;
+    }
+
+    function clampSetting(value, min, max, fallback) {
+        var number = settingsInt(value, fallback);
+        if (number < min) return min;
+        if (number > max) return max;
+        return number;
+    }
+
+    function updateSettingsDisplay() {
+        $("brightnessValue").textContent = $("brightness").value + " 档";
+        $("autoOffTime").disabled = !$("autoOff").checked;
+        $("autoOffHint").textContent = $("autoOff").checked
+            ? "无操作一段时间后关闭屏幕" : "屏幕保持常亮";
+    }
+
+    function renderSettings(config, apEnabled) {
+        if (!config) return;
+        if (!state.settingsDirty) {
+            var brightness = clampSetting(config.brightness,
+                                          SETTINGS.brightnessMin, SETTINGS.brightnessMax, 3);
+            var autoOffSec = clampSetting(config.auto_off_sec,
+                                          SETTINGS.autoOffMin, SETTINGS.autoOffMax, 30);
+            autoOffSec = Math.floor(autoOffSec / SETTINGS.autoOffStep) * SETTINGS.autoOffStep;
+            $("brightness").value = brightness;
+            $("autoOff").checked = config.auto_off_enabled !== false;
+            $("autoOffTime").value = autoOffSec;
+            $("hotspot").checked = apEnabled !== false;
+        }
+        updateSettingsDisplay();
+    }
+
+    function markSettingsDirty() {
+        state.settingsDirty = true;
+        updateSettingsDisplay();
+    }
+
+    function saveSettings() {
+        var brightness = settingsInt($("brightness").value, 3);
+        var autoOffSec = settingsInt($("autoOffTime").value, 30);
+        var autoOffEnabled = $("autoOff").checked;
+        var apEnabled = $("hotspot").checked;
+        if (brightness < SETTINGS.brightnessMin || brightness > SETTINGS.brightnessMax) {
+            toast("亮度需在 1 到 5 档之间", true); return;
+        }
+        if (autoOffSec < SETTINGS.autoOffMin || autoOffSec > SETTINGS.autoOffMax ||
+            autoOffSec % SETTINGS.autoOffStep !== 0) {
+            toast("息屏时间需为 5 到 60 秒之间的 5 秒倍数", true); return;
+        }
+        if (!apEnabled &&
+            !window.confirm("关闭配网热点会断开当前网页连接，需在设备菜单重新开启。确定关闭吗？")) {
+            return;
+        }
+        busy($("settingsSave"), true);
+        api("/api/settings", {
+            method: "POST",
+            body: {
+                brightness: brightness,
+                auto_off_enabled: autoOffEnabled,
+                auto_off_sec: autoOffSec,
+                ap_enabled: apEnabled
+            }
+        }).then(function (data) {
+            state.settingsDirty = false;
+            renderSettings(data.config, data.ap_enabled);
+            toast("设备设置已保存");
+            schedule(600);
+        }).catch(function (err) {
+            toast(err.message, true);
+        }).then(function () {
+            busy($("settingsSave"), false);
+        });
     }
 
     function toast(message, isError) {
@@ -331,13 +551,18 @@ footer code { color: #b7c7db; }
 
         $("portalActions").style.display = (wifi.portal && wifi.configured) ? "flex" : "none";
 
+        var settings = applyDeviceSettings(data.config);
+        if (settings && hasField(settings, "pass")) { $("pass").value = ""; }
         if (!state.initialized) {
-            $("ssid").value = wifi.ssid || "";
-            $("codes").value = data.config.codes_text || "";
-            $("interval").value = data.config.interval || 5;
+            if (settings) {
+                $("ssid").value = settings.ssid;
+                $("codes").value = settings.codes;
+                $("interval").value = settings.interval;
+            }
             state.initialized = true;
         }
 
+        renderSettings(data.config, data.device.ap_enabled);
         renderQuotes(quotes.items || []);
     }
 
@@ -385,10 +610,13 @@ footer code { color: #b7c7db; }
 
     function saveWifi() {
         var ssid = $("ssid").value.trim();
+        var pass = $("pass").value;
         if (!ssid) { toast("请先选择或输入 Wi-Fi 名称", true); return; }
         busy($("wifiSave"), true);
-        api("/api/wifi", { method: "POST", body: { ssid: ssid, pass: $("pass").value } })
+        api("/api/wifi", { method: "POST", body: { ssid: ssid, pass: pass } })
             .then(function () {
+                // 设备已保存该凭据;密码不会由状态接口回传,只能在这里写入缓存。
+                mergeCache({ ssid: ssid, pass: pass });
                 toast("已提交，正在连接 " + ssid);
                 $("networks").className = "networks";
                 schedule(600);
@@ -407,6 +635,7 @@ footer code { color: #b7c7db; }
             .then(function (data) {
                 $("codes").value = data.config.codes_text;
                 $("interval").value = data.config.interval;
+                applyDeviceSettings(data.config);
                 toast("已保存，设备开始刷新行情");
                 schedule(500);
             })
@@ -457,6 +686,7 @@ footer code { color: #b7c7db; }
             .then(function () {
                 $("ssid").value = "";
                 $("pass").value = "";
+                mergeCache({ ssid: "", pass: "" });
                 toast("已清除 Wi-Fi");
                 schedule(500);
             })
@@ -477,7 +707,13 @@ footer code { color: #b7c7db; }
     $("scanBtn").addEventListener("click", scan);
     $("forgetBtn").addEventListener("click", forgetWifi);
     $("closePortal").addEventListener("click", closePortal);
+    $("brightness").addEventListener("input", markSettingsDirty);
+    $("autoOff").addEventListener("change", markSettingsDirty);
+    $("autoOffTime").addEventListener("change", markSettingsDirty);
+    $("hotspot").addEventListener("change", markSettingsDirty);
+    $("settingsSave").addEventListener("click", saveSettings);
 
+    restoreForm();
     poll();
 })();
 </script>
