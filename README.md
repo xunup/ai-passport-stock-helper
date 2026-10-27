@@ -18,23 +18,24 @@
 **AI Passport Stock Helper** is a self-contained firmware for the FoloToy AI Passport
 wearable. It polls Sina Finance for up to eight A-share, index, or ETF codes and
 renders them on a dark four-row quote board. An embedded web page handles Wi-Fi
-provisioning, the watchlist, and device settings; screen brightness, auto screen-off,
-and the provisioning hotspot are also available from the on-device menu. The device UI
-and web page are in Simplified Chinese.
+provisioning, the watchlist, and device settings; screen brightness, refresh interval,
+auto screen-off, and the provisioning hotspot are also available from the on-device
+menu. The device UI and web page are in Simplified Chinese.
 
 > This is a downstream application built on the FoloToy AI Passport baseline.
 > Platform documentation remains upstream content under [`docs/`](/docs/README.md).
 
 ## Features
 
-- **Live watchlist:** up to 8 A-share, index, or ETF codes, refreshed every 3–300 seconds (default 5). Press OK on the quote list to refresh immediately.
+- **Live watchlist:** up to 8 A-share, index, or ETF codes, refreshed on a selectable interval (1/3/5/10/15/30/60/120/300 s, default 5) or manually only when OK is pressed. Press OK on the quote list to refresh immediately.
 - **Readable at a glance:** four rows per screen with name, code, current price, change, and change percentage. Gains are red and losses are green, following the Chinese market convention. ETF prices use three decimals; other instruments use two.
-- **Status chrome:** a Wi-Fi indicator and an optional CW2017 battery gauge in the header, plus a status line for network state, quote errors, and the active refresh interval.
-- **On-device settings:** provisioning hotspot switch, five brightness levels (20–100% backlight), auto screen-off switch, and a 5–60 second timeout in 5-second steps.
-- **Screen-off power saving:** after the idle timeout the backlight turns off and quotes drop to a 60-second poll. Any button wakes the screen; that press only wakes and does not trigger its normal action. Waking restores the configured interval and refreshes immediately.
-- **Web configuration:** live device and quote status, Wi-Fi scan/save/forget, the watchlist editor, and device settings that stay in sync with the on-device menu.
+- **Optional profit/loss:** each watchlist entry can store a cost price and position size in lots. When both are set, the row shows holding profit/loss and today's profit/loss side by side in the same compact style as the change percentage, each prefixed with a short total/today label and colored by its own direction; entries without both values show neither.
+- **Status chrome:** a four-bar Wi-Fi strength indicator (1–4 lit bars by RSSI; blue when connected, pulsing amber while connecting, grey when offline), an optional CW2017 battery percentage, and a 24-hour clock in the header (UTC+8 after network time sync; `--:--` until synced), plus a status line for network state, quote errors, and the active refresh interval, with a spinner shown while a refresh is in progress.
+- **On-device settings:** provisioning hotspot switch, five brightness levels (20–100% backlight), refresh interval presets, auto screen-off switch, and a 5–60 second timeout in 5-second steps.
+- **Screen-off power saving:** after the idle timeout the backlight turns off and quotes drop to a 60-second poll (manual refresh mode does not poll). Any button wakes the screen; that press only wakes and does not trigger its normal action. Waking restores the configured interval and refreshes immediately.
+- **Web configuration:** live device and quote status with holding and today's profit/loss columns, Wi-Fi scan/save/forget, the watchlist editor, per-code cost price and position lots, and device settings that stay in sync with the on-device menu.
 - **Wi-Fi roaming:** when the current RSSI falls below -70 dBm, the device scans every 30 seconds for the same SSID and switches to an access point at least 8 dB stronger and no weaker than -72 dBm.
-- **Persistent state:** Wi-Fi credentials, watchlist, refresh interval, brightness, auto screen-off, and hotspot state are stored in NVS.
+- **Persistent state:** Wi-Fi credentials, watchlist, per-code cost price and lots, refresh interval, brightness, auto screen-off, and hotspot state are stored in NVS.
 
 ## Controls
 
@@ -45,15 +46,16 @@ and web page are in Simplified Chinese.
 | Setup screen | — | — | Open settings |
 | Screen off | Wake the screen | Wake the screen | Wake the screen |
 
-The settings menu has four rows: hotspot switch, screen brightness, auto screen-off
-switch, and screen-off time. The first button press after the screen turns off is
-consumed for the wake-up, including its release event.
+The settings menu has five rows: hotspot switch, screen brightness, refresh interval,
+auto screen-off switch, and screen-off time. The refresh interval can be manual or
+1, 3, 5, 10, 15, 30, 60, 120, or 300 seconds. The first button press after the screen
+turns off is consumed for the wake-up, including its release event.
 
 ## Getting started
 
 1. Power on the device. On first boot, or after Wi-Fi has been cleared, the screen shows a setup card with the hotspot name and `http://192.168.4.1`.
 2. From a phone or computer, join the `FoloStock-XXXX` hotspot. It is an open 2.4 GHz network on channel 6, accepts up to four clients, and has no password.
-3. Open `http://192.168.4.1`. Select a nearby network or type its SSID, enter the password, and save. Then add up to eight stock codes and choose a refresh interval.
+3. Open `http://192.168.4.1`. Select a nearby network or type its SSID, enter the password, and save. Then add up to eight stock codes and choose a refresh interval; optionally enter a cost price and position lots for each code.
 4. Once Wi-Fi connects and the watchlist is not empty, the quote list appears and refreshes automatically.
 
 The hotspot is on by default. After provisioning, turn it off from the web page or the
@@ -68,12 +70,15 @@ address on the same network. Use the settings menu to turn the hotspot back on.
 | Auto screen off | On/off, default on | Device menu, web page |
 | Screen-off timeout | 5–60 s in 5 s steps, default 30 s | Device menu, web page |
 | Provisioning hotspot | On/off, default on | Device menu, web page |
-| Refresh interval | 3–300 s, default 5 s | Web page |
+| Refresh interval | Manual or 1/3/5/10/15/30/60/120/300 s, default 5 s | Device menu, web page |
 | Watchlist | 1–8 codes | Web page |
+| Cost price and lots | Optional per code; both required to show profit/loss and today's profit/loss | Web page |
 
-On the web page, brightness, auto screen-off, and hotspot changes are written to the
-device only when **Save device settings** is pressed. The page polls `/api/status`
-every 2 seconds and refreshes the quote table and status cards from that response.
+With a manual refresh interval the quotes do not update automatically; press OK on the
+device to refresh once. On the web page, brightness, auto screen-off, and hotspot
+changes are written to the device only when **Save device settings** is pressed. The
+page polls `/api/status` every 2 seconds and refreshes the quote table and status cards
+from that response.
 
 ## Stock codes
 
@@ -95,6 +100,7 @@ The embedded page is served from flash and uses these endpoints:
 | `GET /api/status` | Device, Wi-Fi, quote, and configuration snapshot |
 | `GET /api/config` | Current watchlist and device settings |
 | `POST /api/config` | Save `codes` and `interval` |
+| `POST /api/positions` | Save per-code cost price and position lots |
 | `POST /api/settings` | Save brightness, auto screen-off, and hotspot state |
 | `GET /api/scan` | Scan nearby 2.4 GHz networks |
 | `POST /api/wifi` | Save Wi-Fi credentials and reconnect |
@@ -105,9 +111,10 @@ The embedded page is served from flash and uses these endpoints:
 
 - Quote data comes from the Sina Finance endpoint at `hq.sinajs.cn`. An internet connection and 2.4 GHz Wi-Fi are required; the ESP32-C3 does not support 5 GHz.
 - Quotes may be delayed and are provided for reference only. This firmware does not place orders and is not investment advice.
-- The UI fonts cover GB2312 level-one Hanzi and 23 UI punctuation marks. Stock names containing other characters display those characters as `?`.
+- Holding profit/loss uses (current price − cost price) × lots × 100 shares; today's profit/loss uses (current price − previous close) × lots × 100 shares. Both exclude fees, taxes, and dividends and are for reference only.
+- The UI fonts cover GB2312 level-one Hanzi and 23 UI punctuation marks; a compact 12px font renders the profit/loss line. Stock names containing other characters display those characters as `?`.
 - Long names and codes are shortened with an ellipsis to fit their rows.
-- The two embedded fonts occupy roughly 768 KB of flash; the board has no PSRAM.
+- The embedded fonts occupy roughly 770 KB of flash; the board has no PSRAM.
 - The provisioning hotspot is open. Turn it off when it is not needed, and do not leave the configuration page open on a shared device: the browser caches form values in local storage, though the device never returns the stored Wi-Fi password.
 
 ## Build, test, and flash

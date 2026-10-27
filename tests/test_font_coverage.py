@@ -10,6 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FONT_DIR = ROOT / "assets" / "fonts"
 FONTS = (FONT_DIR / "lv_font_cn_16.c", FONT_DIR / "lv_font_cn_22.c")
+PNL_FONT = FONT_DIR / "lv_font_cn_12_pnl.c"
+PNL_CHARS = "总今万亿"
 
 # Keep in sync with COMMON_SYMBOLS in tools/gen_cjk_font.py.
 SYMBOLS = "，。！？：；、‘’“”（）【】《》…—·￥↑↓"
@@ -22,6 +24,7 @@ UI_SOURCES = (
     ROOT / "main" / "web_server.c",
     ROOT / "main" / "quote_worker.c",
     ROOT / "main" / "quote_format.c",
+    ROOT / "main" / "stock_positions.c",
 )
 
 CMAP_RE = re.compile(
@@ -106,6 +109,19 @@ def main() -> None:
 
     first, second = (coverages[name] for name in (FONTS[0].name, FONTS[1].name))
     assert first == second, "16px and 22px font coverage differ"
+
+    pnl_covered, pnl_sparse = font_coverage(PNL_FONT)
+    pnl_chars = {chr(codepoint) for codepoint in pnl_covered}
+    assert pnl_sparse == len(PNL_CHARS), \
+        f"{PNL_FONT.name}: sparse glyphs={pnl_sparse}, expected {len(PNL_CHARS)}"
+    pnl_required = {chr(c) for c in range(0x20, 0x7F)} | set(PNL_CHARS)
+    pnl_missing = pnl_required - pnl_chars
+    assert not pnl_missing, (
+        f"{PNL_FONT.name}: missing {len(pnl_missing)} glyphs: "
+        + " ".join(f"U+{ord(ch):04X}({ch})" for ch in sorted(pnl_missing)[:12]))
+    assert "今" in (ROOT / "main" / "ui_app.c").read_text(encoding="utf-8"), \
+        "UI no longer uses the compact P/L font's glyphs"
+    print(f"{PNL_FONT.name}: {len(pnl_chars)} codepoints, {pnl_sparse} CJK glyphs, P/L text covered")
 
     print(f"UI glyphs checked: {len(ui_chars)}; font coverage tests: PASS")
 

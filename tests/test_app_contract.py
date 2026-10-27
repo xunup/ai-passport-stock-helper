@@ -99,18 +99,69 @@ class AppWiringTest(unittest.TestCase):
         self.assertIn("BSP_BTN_PRESS", self.controller)
         self.assertIn("BSP_BTN_RELEASE", self.controller)
 
+    def test_refresh_interval_menu_and_manual_mode(self) -> None:
+        menu = read("main/menu_model.c")
+        store = read("main/config_store.c")
+        self.assertIn("MENU_ITEM_REFRESH", read("main/menu_model.h"))
+        self.assertIn("refresh_interval_step", menu)
+        self.assertIn("MENU_CHANGE_REFRESH_INTERVAL", self.controller)
+        self.assertIn("config_store_save_interval", self.controller)
+        self.assertIn("quote_worker_set_interval", self.controller)
+        self.assertIn("refresh_interval_normalize", store)
+        self.assertIn("REFRESH_INTERVAL_MANUAL", self.quotes)
+        self.assertIn("portMAX_DELAY", self.quotes)
+
+    def test_auto_refresh_limited_to_trading_hours(self) -> None:
+        self.assertIn("market_hours_is_trading", self.quotes)
+        self.assertIn("market_hours_seconds_until_open", self.quotes)
+        self.assertIn("time_app_now_hms", self.quotes)
+        self.assertIn("market_hours_is_trading", self.controller)
+        self.assertIn("market_open", self.ui)
+        self.assertIn("休市", self.ui)
+
     def test_wifi_indicator_reflects_connection_on_every_screen(self) -> None:
-        self.assertIn("LV_SYMBOL_WIFI", self.ui)
+        self.assertIn("#define WIFI_BAR_COUNT 4", self.ui)
+        self.assertIn("wifi_signal_level", self.ui)
         for name in ("ui_app_update_list", "ui_app_update_setup", "ui_app_update_menu"):
             body = function_body(self.ui, name)
             self.assertIn("set_wifi(", body)
         self.assertIn(".wifi_connected = wifi->sta_connected", self.controller)
+        self.assertIn(".rssi = wifi->rssi", self.controller)
+
+    def test_status_line_shows_refresh_spinner_while_fetching(self) -> None:
+        self.assertIn("lv_spinner_create", self.ui)
+        body = function_body(self.ui, "ui_app_update_list")
+        self.assertIn("snapshot->fetching", body)
+        self.assertIn("s_list_refresh", body)
 
     def test_weak_signal_roaming_is_wired(self) -> None:
         self.assertIn("roam_policy_should_switch", self.wifi)
         self.assertIn("esp_wifi_scan_start", self.wifi)
         self.assertIn("s_roam_in_progress", self.wifi)
         self.assertIn("ROAM_PERIOD_MS", self.wifi)
+
+    def test_cost_and_lots_drive_profit_display(self) -> None:
+        store = read("main/config_store.c")
+        server = read("main/web_server.c")
+        self.assertIn('KEY_POSITIONS "positions"', store)
+        self.assertIn("config_store_save_positions", store)
+        self.assertIn("stock_positions_parse", store)
+        self.assertIn("stock_positions_serialize", store)
+        self.assertIn("stock_position_profit", self.ui)
+        self.assertIn("stock_position_today_profit", self.ui)
+        self.assertIn("stock_position_is_set", self.ui)
+        self.assertIn("lv_font_cn_12_pnl", self.ui)
+        self.assertIn("lv_label_set_recolor", self.ui)
+        self.assertIn("总:%s", self.ui)
+        self.assertIn("今:%s", self.ui)
+        self.assertNotIn("盈亏", self.ui)
+        self.assertIn("memcmp(a->cost_price", self.controller)
+        self.assertIn("memcmp(a->lots", self.controller)
+        self.assertIn("/api/positions", server)
+        self.assertIn("positions_post", server)
+        self.assertIn('"pnl"', server)
+        self.assertIn('"pnl_today"', server)
+        self.assertIn("stock_position_today_profit", server)
 
 
 if __name__ == "__main__":

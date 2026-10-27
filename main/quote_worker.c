@@ -1,6 +1,10 @@
 // main/quote_worker.c —— 新浪 hq.sinajs.cn 轮询任务。
 #include "quote_worker.h"
 
+#include "market_hours.h"
+#include "refresh_options.h"
+#include "time_app.h"
+
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -22,6 +26,7 @@ static const char *TAG = "quote_worker";
 #define QUOTE_TASK_PRIORITY 5
 #define QUOTE_RETRY_MS 1500
 #define QUOTE_IDLE_INTERVAL_SEC 60
+#define QUOTE_CLOSED_CHECK_SEC 60
 
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
@@ -178,11 +183,39 @@ static void poll_once(void)
     ESP_LOGI(TAG, "已更新 %u 条行情", (unsigned)parsed_count);
 }
 
+// 未对时时不拦截自动刷新,避免时间无效导致行情永远不更新。
+static bool market_is_open(void)
+{
+    int hour = 0;
+    int minute = 0;
+    if (!time_app_now_hm(&hour, &minute)) return true;
+    return market_hours_is_trading(hour, minute);
+}
+
+static uint32_t market_closed_wait_ms(void)
+{
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    if (!time_app_now_hms(&hour, &minute, &second)) {
+        return QUOTE_CLOSED_CHECK_SEC * 1000U;
+    }
+
+    int wait_sec = market_hours_seconds_until_open(hour, minute, second);
+    if (wait_sec < 1) wait_sec = 1;
+    if (wait_sec > QUOTE_CLOSED_CHECK_SEC) wait_sec = QUOTE_CLOSED_CHECK_SEC;
+    return (uint32_t)wait_sec * 1000U;
+}
+
 static void quote_task(void *arg)
 {
     (void)arg;
+    // 首次启动先拉一次,休市开机也能显示最近收盘行情。
+    bool requested = true;
     for (;;) {
-        poll_once();
+        const bool trading = market_is_open();
+        if (requested || trading) poll_once();
+
         uint16_t interval = 5;
         bool idle = false;
         if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -190,8 +223,19 @@ static void quote_task(void *arg)
             idle = s_idle;
             xSemaphoreGive(s_lock);
         }
+
+        if (interval == REFRESH_INTERVAL_MANUAL) {
+            // 手动模式:不自动轮询,等 OK 键或配置变更通知。
+            requested = ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0;
+            continue;
+        }
+        if (!trading) {
+            // 非交易时段不自动刷新,只按开盘时刻唤醒做时间检查。
+            requested = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(market_closed_wait_ms())) > 0;
+            continue;
+        }
         if (idle) interval = QUOTE_IDLE_INTERVAL_SEC;
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((uint32_t)interval * 1000U));
+        requested = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((uint32_t)interval * 1000U)) > 0;
     }
 }
 
@@ -204,7 +248,7 @@ esp_err_t quote_worker_start(const char *codes_text, int interval_sec)
     }
     if (!codes_text) codes_text = "";
     snprintf(s_codes, sizeof(s_codes), "%s", codes_text);
-    s_interval_sec = (uint16_t)(interval_sec > 0 ? interval_sec : 5);
+    s_interval_sec = (uint16_t)(interval_sec >= 0 ? interval_sec : 5);
     s_error[0] = '\0';
     s_error[sizeof(s_error) - 1] = '\0';
 
@@ -222,13 +266,23 @@ void quote_worker_reload(const char *codes_text, int interval_sec)
     if (!codes_text) codes_text = "";
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
         snprintf(s_codes, sizeof(s_codes), "%s", codes_text);
-        s_interval_sec = (uint16_t)(interval_sec > 0 ? interval_sec : 5);
+        s_interval_sec = (uint16_t)(interval_sec >= 0 ? interval_sec : 5);
         s_count = 0;
         s_has_data = false;
         s_last_ok = false;
         s_fetching = false;
         s_error[0] = '\0';
         s_generation++;
+        xSemaphoreGive(s_lock);
+    }
+    quote_worker_request_refresh();
+}
+
+void quote_worker_set_interval(uint16_t interval_sec)
+{
+    if (!s_lock) return;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
+        s_interval_sec = interval_sec;
         xSemaphoreGive(s_lock);
     }
     quote_worker_request_refresh();

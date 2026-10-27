@@ -4,10 +4,13 @@
 #include "bsp_battery.h"
 #include "bsp_button.h"
 #include "bsp_display.h"
+#include "bsp_pins.h"
 #include "config_store.h"
+#include "market_hours.h"
 #include "menu_model.h"
 #include "quote_worker.h"
 #include "stock_codes.h"
+#include "time_app.h"
 #include "ui_app.h"
 #include "ui_model.h"
 #include "web_server.h"
@@ -48,6 +51,7 @@ static bool s_battery_ok;
 static bool s_menu_open;
 static bool s_screen_off;
 static bool s_swallow_wake;
+static bool s_long_pressed[BSP_BTN_COUNT];
 static int s_brightness;
 static int s_auto_off_sec;
 static bool s_auto_off_enabled;
@@ -75,7 +79,9 @@ static bool stock_config_equal(const stock_config_t *a, const stock_config_t *b)
            a->interval_sec == b->interval_sec &&
            strcmp(a->ssid, b->ssid) == 0 &&
            strcmp(a->pass, b->pass) == 0 &&
-           memcmp(a->codes, b->codes, sizeof(a->codes)) == 0;
+           memcmp(a->codes, b->codes, sizeof(a->codes)) == 0 &&
+           memcmp(a->cost_price, b->cost_price, sizeof(a->cost_price)) == 0 &&
+           memcmp(a->lots, b->lots, sizeof(a->lots)) == 0;
 }
 
 // 网页与设备菜单共用 config_store;本循环同时收敛亮度和热点等菜单设置。
@@ -104,13 +110,18 @@ static bool apply_new_config(void)
     }
     if (!stock_config_equal(&s_config, &next)) {
         ui_model_set_count(&s_model, next.count);
-        ESP_LOGI(TAG, "配置更新: %d 只股票, %u 秒", next.count, next.interval_sec);
+        if (next.interval_sec == STOCK_CONFIG_INTERVAL_MANUAL) {
+            ESP_LOGI(TAG, "配置更新: %d 只股票, 手动刷新", next.count);
+        } else {
+            ESP_LOGI(TAG, "配置更新: %d 只股票, %u 秒", next.count, next.interval_sec);
+        }
         changed = true;
     }
     if (changed) {
         s_config = next;
         if (s_menu_open) {
             s_menu.brightness = (uint8_t)s_brightness;
+            s_menu.interval_sec = s_config.interval_sec;
             s_menu.auto_off_sec = (uint8_t)s_auto_off_sec;
             s_menu.auto_off_enabled = s_auto_off_enabled;
             s_menu.ap_enabled = s_ap_enabled;
@@ -133,6 +144,15 @@ static void apply_menu_change(menu_change_t change)
         s_brightness = s_menu.brightness;
         bsp_display_backlight(brightness_percent(s_brightness));
         persist_display();
+    } else if (change == MENU_CHANGE_REFRESH_INTERVAL) {
+        const esp_err_t err = config_store_save_interval(s_menu.interval_sec);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "保存刷新间隔失败: %s", esp_err_to_name(err));
+            s_menu.interval_sec = s_config.interval_sec;
+            return;
+        }
+        s_config.interval_sec = s_menu.interval_sec;
+        quote_worker_set_interval(s_menu.interval_sec);
     } else if (change == MENU_CHANGE_AUTO_OFF_TIME) {
         s_auto_off_sec = s_menu.auto_off_sec;
         persist_display();
@@ -160,10 +180,24 @@ static void toggle_hotspot(void)
 
 static void open_menu(void)
 {
-    menu_model_init(&s_menu, (uint8_t)s_brightness, (uint8_t)s_auto_off_sec,
-                    s_auto_off_enabled, s_ap_enabled);
+    menu_model_init(&s_menu, (uint8_t)s_brightness, s_config.interval_sec,
+                    (uint8_t)s_auto_off_sec, s_auto_off_enabled, s_ap_enabled);
     s_menu_open = true;
     s_last_activity_us = esp_timer_get_time();
+}
+
+static bool wifi_is_connecting(const wifi_app_info_t *wifi)
+{
+    return !s_wifi_error && wifi->sta_configured && !wifi->sta_connected;
+}
+
+// 与行情任务保持一致:未对时时不做时段限制。
+static bool market_is_open(void)
+{
+    int hour = 0;
+    int minute = 0;
+    if (!time_app_now_hm(&hour, &minute)) return true;
+    return market_hours_is_trading(hour, minute);
 }
 
 static void render_setup(const wifi_app_info_t *wifi)
@@ -196,6 +230,8 @@ static void render_setup(const wifi_app_info_t *wifi)
         .status = status,
         .hint = hint,
         .wifi_connected = wifi->sta_connected,
+        .wifi_connecting = wifi_is_connecting(wifi),
+        .rssi = wifi->rssi,
         .battery_pct = s_battery_pct,
         .battery_ok = s_battery_ok,
     };
@@ -203,7 +239,8 @@ static void render_setup(const wifi_app_info_t *wifi)
     ui_app_update_setup(&view);
 }
 
-static void render_list(const wifi_app_info_t *wifi, const quote_snapshot_t *quotes)
+static void render_list(const wifi_app_info_t *wifi, const quote_snapshot_t *quotes,
+                        bool market_open)
 {
     ui_list_view_t view = {
         .config = &s_config,
@@ -211,8 +248,11 @@ static void render_list(const wifi_app_info_t *wifi, const quote_snapshot_t *quo
         .selected = s_model.selected,
         .offset = s_model.offset,
         .wifi_connected = wifi->sta_connected,
+        .wifi_connecting = wifi_is_connecting(wifi),
+        .rssi = wifi->rssi,
         .battery_pct = s_battery_pct,
         .battery_ok = s_battery_ok,
+        .market_open = market_open,
     };
     ui_app_show_list();
     ui_app_update_list(&view);
@@ -224,10 +264,13 @@ static void render_menu(const wifi_app_info_t *wifi)
         .selected = s_menu.selected,
         .editing = s_menu.editing,
         .brightness = s_menu.brightness,
+        .interval_sec = s_menu.interval_sec,
         .auto_off_sec = s_menu.auto_off_sec,
         .auto_off_enabled = s_menu.auto_off_enabled,
         .ap_enabled = s_menu.ap_enabled,
         .wifi_connected = wifi->sta_connected,
+        .wifi_connecting = wifi_is_connecting(wifi),
+        .rssi = wifi->rssi,
         .battery_pct = s_battery_pct,
         .battery_ok = s_battery_ok,
     };
@@ -244,6 +287,8 @@ static void controller_task(void *arg)
     int last_battery = -2;
     int64_t last_battery_us = 0;
     bool dirty = true;
+    bool last_market_open = market_is_open();
+    int last_rssi = -128;
     s_last_activity_us = esp_timer_get_time();
 
     for (;;) {
@@ -251,6 +296,8 @@ static void controller_task(void *arg)
         if (xQueueReceive(s_keys, &event, pdMS_TO_TICKS(200)) == pdTRUE) {
             const bsp_btn_t btn = (bsp_btn_t)event.btn;
             const bsp_btn_ev_t ev = (bsp_btn_ev_t)event.ev;
+
+            if (ev == BSP_BTN_PRESS) s_long_pressed[btn] = false;
 
             if (s_screen_off) {
                 if (ev == BSP_BTN_PRESS) {
@@ -262,8 +309,12 @@ static void controller_task(void *arg)
                     quote_worker_request_refresh();
                     s_last_activity_us = esp_timer_get_time();
                     dirty = true;
-                    ESP_LOGI(TAG, "屏幕唤醒,恢复 %u 秒行情刷新",
-                             (unsigned)s_config.interval_sec);
+                    if (s_config.interval_sec == STOCK_CONFIG_INTERVAL_MANUAL) {
+                        ESP_LOGI(TAG, "屏幕唤醒,恢复手动刷新");
+                    } else {
+                        ESP_LOGI(TAG, "屏幕唤醒,恢复 %u 秒行情刷新",
+                                 (unsigned)s_config.interval_sec);
+                    }
                 }
                 continue;
             }
@@ -274,8 +325,21 @@ static void controller_task(void *arg)
 
             s_last_activity_us = esp_timer_get_time();
 
-            if (s_menu_open) {
-                if (ev == BSP_BTN_CLICK) {
+            if (ev == BSP_BTN_LONG) {
+                // 这一下已由长按接管,松手不再当单击处理。
+                s_long_pressed[btn] = true;
+                if (btn == BSP_BTN_OK) {
+                    if (s_menu_open) {
+                        s_menu_open = false;
+                    } else {
+                        open_menu();
+                    }
+                    dirty = true;
+                }
+            } else if (ev == BSP_BTN_RELEASE) {
+                const bool long_pressed = s_long_pressed[btn];
+                s_long_pressed[btn] = false;
+                if (!long_pressed && s_menu_open) {
                     if (btn == BSP_BTN_UP || btn == BSP_BTN_DOWN) {
                         const menu_change_t change =
                             menu_model_move(&s_menu, btn == BSP_BTN_UP ? -1 : 1);
@@ -286,21 +350,15 @@ static void controller_task(void *arg)
                         if (action == MENU_ACTIVATE_TOGGLE_HOTSPOT) toggle_hotspot();
                         dirty = true;
                     }
-                } else if (ev == BSP_BTN_LONG && btn == BSP_BTN_OK) {
-                    s_menu_open = false;
-                    dirty = true;
+                } else if (!long_pressed) {
+                    if (btn == BSP_BTN_UP) {
+                        dirty = ui_model_move(&s_model, -1) || dirty;
+                    } else if (btn == BSP_BTN_DOWN) {
+                        dirty = ui_model_move(&s_model, 1) || dirty;
+                    } else if (btn == BSP_BTN_OK) {
+                        quote_worker_request_refresh();
+                    }
                 }
-            } else if (ev == BSP_BTN_CLICK) {
-                if (btn == BSP_BTN_UP) {
-                    dirty = ui_model_move(&s_model, -1) || dirty;
-                } else if (btn == BSP_BTN_DOWN) {
-                    dirty = ui_model_move(&s_model, 1) || dirty;
-                } else if (btn == BSP_BTN_OK) {
-                    quote_worker_request_refresh();
-                }
-            } else if (ev == BSP_BTN_LONG && btn == BSP_BTN_OK) {
-                open_menu();
-                dirty = true;
             }
         }
 
@@ -315,6 +373,11 @@ static void controller_task(void *arg)
 
         wifi_app_info_t wifi;
         wifi_app_get_info(&wifi);
+        if (wifi.rssi != last_rssi) {
+            // 漫游任务的 RSSI 每 30 秒刷新一次,信号格随之更新。
+            last_rssi = wifi.rssi;
+            dirty = true;
+        }
         const bool portal = s_wifi_error || wifi.portal || s_config.count == 0;
         const bool just_connected = wifi.sta_connected && !last_connected;
         if (portal != last_portal || wifi.sta_connected != last_connected) {
@@ -327,13 +390,23 @@ static void controller_task(void *arg)
             quote_worker_request_refresh();
         }
 
+        const bool market_open = market_is_open();
+        if (market_open != last_market_open) {
+            last_market_open = market_open;
+            dirty = true;
+        }
+
         const int64_t now_us = esp_timer_get_time();
         if (!s_screen_off && s_auto_off_enabled && s_auto_off_sec > 0 &&
             now_us - s_last_activity_us >= (int64_t)s_auto_off_sec * 1000 * 1000) {
             s_screen_off = true;
             bsp_display_backlight(0);
             quote_worker_set_idle(true);
-            ESP_LOGI(TAG, "自动息屏(%d 秒),行情改为 60 秒刷新", s_auto_off_sec);
+            if (s_config.interval_sec == STOCK_CONFIG_INTERVAL_MANUAL) {
+                ESP_LOGI(TAG, "自动息屏(%d 秒),行情保持手动刷新", s_auto_off_sec);
+            } else {
+                ESP_LOGI(TAG, "自动息屏(%d 秒),行情改为 60 秒刷新", s_auto_off_sec);
+            }
         }
 
         if (now_us - last_battery_us >= BATTERY_PERIOD_US) {
@@ -354,7 +427,7 @@ static void controller_task(void *arg)
             } else if (portal) {
                 render_setup(&wifi);
             } else {
-                render_list(&wifi, &snapshot);
+                render_list(&wifi, &snapshot, market_open);
             }
             dirty = false;
         }
@@ -382,6 +455,9 @@ esp_err_t app_controller_start(void)
         ESP_LOGE(TAG, "Wi-Fi 启动失败: %s", esp_err_to_name(err));
         s_wifi_error = true;
     }
+
+    err = time_app_start();
+    if (err != ESP_OK) ESP_LOGE(TAG, "网络对时启动失败: %s", esp_err_to_name(err));
 
     ui_app_init();
     bsp_display_backlight(brightness_percent(s_brightness));

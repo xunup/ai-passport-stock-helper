@@ -6,6 +6,7 @@
 #include "quote_parse.h"
 #include "quote_worker.h"
 #include "stock_codes.h"
+#include "stock_positions.h"
 #include "wifi_app.h"
 
 #include "cJSON.h"
@@ -13,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,6 +89,15 @@ static void add_config(cJSON *parent, const char *name, const stock_config_t *cf
     for (int i = 0; codes && i < cfg->count; i++) {
         cJSON_AddItemToArray(codes, cJSON_CreateString(cfg->codes[i]));
     }
+    cJSON *positions = cJSON_AddArrayToObject(object, "positions");
+    for (int i = 0; positions && i < cfg->count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        if (!item) break;
+        cJSON_AddStringToObject(item, "code", cfg->codes[i]);
+        cJSON_AddNumberToObject(item, "cost", cfg->cost_price[i]);
+        cJSON_AddNumberToObject(item, "lots", cfg->lots[i]);
+        cJSON_AddItemToArray(positions, item);
+    }
 }
 
 static esp_err_t root_get(httpd_req_t *req)
@@ -150,7 +161,11 @@ static esp_err_t status_get(httpd_req_t *req)
         char price_text[24] = "--";
         char change_text[24] = "--";
         char pct_text[16] = "--";
+        char pnl_text[24] = "";
+        char pnl_today_text[24] = "";
         const char *trend = "flat";
+        const char *pnl_trend = "flat";
+        const char *pnl_today_trend = "flat";
         if (quote && quote->valid) {
             quote_format_price(price_text, sizeof(price_text), code, quote->price);
             quote_format_signed(change_text, sizeof(change_text), quote->change,
@@ -159,11 +174,31 @@ static esp_err_t status_get(httpd_req_t *req)
             const quote_trend_t direction = quote_trend(quote->change);
             trend = direction == QUOTE_TREND_UP ? "up" :
                     (direction == QUOTE_TREND_DOWN ? "down" : "flat");
+
+            const double cost = cfg.cost_price[i];
+            const uint32_t lots = cfg.lots[i];
+            if (stock_position_is_set(cost, lots)) {
+                const double profit = stock_position_profit(quote->price, cost, lots);
+                stock_position_format_amount(pnl_text, sizeof(pnl_text), profit);
+                const quote_trend_t pnl_direction = quote_trend(profit);
+                pnl_trend = pnl_direction == QUOTE_TREND_UP ? "up" :
+                            (pnl_direction == QUOTE_TREND_DOWN ? "down" : "flat");
+
+                const double today = stock_position_today_profit(quote->change, lots);
+                stock_position_format_amount(pnl_today_text, sizeof(pnl_today_text), today);
+                const quote_trend_t today_direction = quote_trend(today);
+                pnl_today_trend = today_direction == QUOTE_TREND_UP ? "up" :
+                                  (today_direction == QUOTE_TREND_DOWN ? "down" : "flat");
+            }
         }
         cJSON_AddStringToObject(item, "price", price_text);
         cJSON_AddStringToObject(item, "change", change_text);
         cJSON_AddStringToObject(item, "pct", pct_text);
         cJSON_AddStringToObject(item, "trend", trend);
+        cJSON_AddStringToObject(item, "pnl", pnl_text);
+        cJSON_AddStringToObject(item, "pnl_trend", pnl_trend);
+        cJSON_AddStringToObject(item, "pnl_today", pnl_today_text);
+        cJSON_AddStringToObject(item, "pnl_today_trend", pnl_today_trend);
         cJSON_AddItemToArray(items, item);
     }
 
@@ -205,9 +240,9 @@ static esp_err_t config_post(httpd_req_t *req)
         cJSON_Delete(json);
         return send_error(req, "400 Bad Request", "刷新间隔必须是数字");
     }
-    if (interval < STOCK_CONFIG_INTERVAL_MIN || interval > STOCK_CONFIG_INTERVAL_MAX) {
+    if (interval < STOCK_CONFIG_INTERVAL_MANUAL || interval > STOCK_CONFIG_INTERVAL_MAX) {
         cJSON_Delete(json);
-        return send_error(req, "400 Bad Request", "刷新间隔需在 3 到 300 秒之间");
+        return send_error(req, "400 Bad Request", "刷新间隔需在 1 到 300 秒之间，0 表示手动");
     }
 
     char codes[STOCK_CODES_MAX][STOCK_CODE_LEN];
@@ -239,6 +274,91 @@ static esp_err_t config_post(httpd_req_t *req)
     stock_codes_join(joined, sizeof(joined), saved.codes, saved.count);
     quote_worker_reload(joined, saved.interval_sec);
 
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return ESP_ERR_NO_MEM;
+    cJSON_AddBoolToObject(root, "ok", true);
+    add_config(root, "config", &saved);
+    return send_json(req, root, NULL);
+}
+
+static esp_err_t positions_post(httpd_req_t *req)
+{
+    char body[MAX_BODY];
+    if (read_body(req, body, sizeof(body)) != ESP_OK) {
+        return send_error(req, "400 Bad Request", "请求体过大或为空");
+    }
+    cJSON *json = cJSON_Parse(body);
+    if (!json) return send_error(req, "400 Bad Request", "JSON 格式不正确");
+
+    const cJSON *array = cJSON_GetObjectItemCaseSensitive(json, "positions");
+    if (!cJSON_IsArray(array)) {
+        cJSON_Delete(json);
+        return send_error(req, "400 Bad Request", "缺少成本与持仓数据");
+    }
+
+    stock_config_t current;
+    config_store_get(&current);
+    stock_position_t items[STOCK_CODES_MAX];
+    int count = 0;
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, array) {
+        const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(entry, "code");
+        const cJSON *cost_item = cJSON_GetObjectItemCaseSensitive(entry, "cost");
+        const cJSON *lots_item = cJSON_GetObjectItemCaseSensitive(entry, "lots");
+        if (!cJSON_IsString(code_item) || !code_item->valuestring ||
+            !cJSON_IsNumber(cost_item) || !cJSON_IsNumber(lots_item)) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "成本与持仓格式不正确");
+        }
+        if (count >= STOCK_CODES_MAX) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "最多支持 8 只股票");
+        }
+
+        char code[STOCK_CODE_LEN];
+        if (!stock_code_normalize(code_item->valuestring, code)) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "股票代码格式不正确");
+        }
+        bool known = false;
+        for (int i = 0; i < current.count; i++) {
+            if (strcmp(current.codes[i], code) == 0) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "股票不在自选列表中");
+        }
+
+        const double cost = cost_item->valuedouble;
+        const double lots = lots_item->valuedouble;
+        if (!isfinite(cost) || cost < 0 || cost > STOCK_POSITION_COST_MAX) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "成本价需在 0 到 1000000 之间");
+        }
+        if (!isfinite(lots) || lots < 0 || lots > STOCK_POSITION_LOTS_MAX ||
+            lots != (double)(uint32_t)lots) {
+            cJSON_Delete(json);
+            return send_error(req, "400 Bad Request", "持仓手数需为 0 到 100000 的整数");
+        }
+
+        snprintf(items[count].code, sizeof(items[count].code), "%s", code);
+        items[count].cost = cost;
+        items[count].lots = (uint32_t)lots;
+        count++;
+    }
+    cJSON_Delete(json);
+
+    const esp_err_t err = config_store_save_positions(items, count);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "保存成本与持仓失败: %s", esp_err_to_name(err));
+        return send_error(req, "500 Internal Server Error", "保存成本与持仓失败，请重试");
+    }
+
+    stock_config_t saved;
+    config_store_get(&saved);
     cJSON *root = cJSON_CreateObject();
     if (!root) return ESP_ERR_NO_MEM;
     cJSON_AddBoolToObject(root, "ok", true);
@@ -448,7 +568,7 @@ esp_err_t web_server_start(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 12;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
     config.recv_wait_timeout = 5;
@@ -464,6 +584,8 @@ esp_err_t web_server_start(void)
     if (err == ESP_OK) err = register_handler(s_server, "/api/status", HTTP_GET, status_get);
     if (err == ESP_OK) err = register_handler(s_server, "/api/config", HTTP_GET, config_get);
     if (err == ESP_OK) err = register_handler(s_server, "/api/config", HTTP_POST, config_post);
+    if (err == ESP_OK) err = register_handler(s_server, "/api/positions", HTTP_POST,
+                                              positions_post);
     if (err == ESP_OK) err = register_handler(s_server, "/api/settings", HTTP_POST,
                                               settings_post);
     if (err == ESP_OK) err = register_handler(s_server, "/api/scan", HTTP_GET, scan_get);

@@ -21,6 +21,8 @@ typedef struct {
 
 esp_err_t quote_worker_start(const char *codes_text, int interval_sec);
 void quote_worker_reload(const char *codes_text, int interval_sec);
+// 只改刷新间隔并立即按新间隔重新排程;0 表示手动,不再自动轮询。
+void quote_worker_set_interval(uint16_t interval_sec);
 void quote_worker_request_refresh(void);
 // 息屏时降到每 60 秒一次;唤醒后恢复用户设置的间隔并立即刷新。
 void quote_worker_set_idle(bool idle);

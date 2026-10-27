@@ -25,12 +25,9 @@ CONFIG_LV_DEF_REFR_PERIOD=20
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 # LVGL 内置 malloc 池大小(KB)。它是独立静态区、不与系统堆共享。
-# 本应用两个页面 + 四行行情,32KB 留有渲染余量。
-CONFIG_LV_MEM_SIZE_KILOBYTES=32
-
-# --- HTTP ---
-# 配置页共 8 条路由,留出余量便于后续扩展。
-CONFIG_HTTPD_MAX_URI_HANDLERS=12
+# 三个页面 + 菜单五行的控件与样式约占 30KB,再留出字形绘制缓冲,
+# 32KB 会触发 LV_ASSERT_MALLOC 死循环(表现为 LVGL 任务卡死、看门狗报警)。
+CONFIG_LV_MEM_SIZE_KILOBYTES=64
 
 # --- 系统 ---
 CONFIG_FREERTOS_HZ=1000

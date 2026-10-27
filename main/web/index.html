@@ -140,7 +140,42 @@ button.danger { background: transparent; color: var(--up); border-color: rgba(25
 .net:hover { background: #101b2a; }
 .net .name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .net .meta { color: var(--muted); font-size: 11.5px; flex: 0 0 auto; }
-.quotes { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.quotes-wrap { overflow-x: auto; }
+.quotes {
+    width: 100%; border-collapse: collapse; margin-top: 4px;
+}
+.quotes.with-pnl, .quotes.with-pnl-today { min-width: 500px; }
+.quotes:not(.with-pnl) .pnl-col,
+.quotes:not(.with-pnl-today) .pnl-today-col { display: none; }
+.positions-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin: 16px 0 8px; font-size: 13.5px;
+}
+.positions-head .tag { color: var(--muted); font-size: 11.5px; }
+.positions { display: grid; gap: 8px; }
+.position-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) 118px 106px; gap: 10px;
+    align-items: end;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 11px; padding: 9px 11px;
+}
+.position-row .stock { min-width: 0; padding-bottom: 6px; }
+.position-row .stock .name {
+    display: block; font-size: 13.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.position-row .stock .code {
+    display: block; color: var(--muted); font-size: 11px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+}
+.position-field { display: block; }
+.position-field span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.position-field input {
+    padding: 7px 9px; font-size: 13px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+}
+.position-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.position-actions .hint { margin-top: 0; }
 .quotes th { color: var(--muted); font-size: 11.5px; font-weight: 500; text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .quotes th:first-child { text-align: left; }
 .quotes td { padding: 9px 8px; border-bottom: 1px solid rgba(30, 42, 58, 0.65); text-align: right; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13.5px; }
@@ -169,6 +204,8 @@ footer code { color: #b7c7db; }
     .wrap { padding: 16px 12px 32px; }
     .chip { display: none; }
     .row > .tight { flex: 1 1 100%; }
+    .position-row { grid-template-columns: 1fr 1fr; }
+    .position-row .stock { grid-column: 1 / -1; padding-bottom: 0; }
 }
 </style>
 </head>
@@ -292,26 +329,48 @@ footer code { color: #b7c7db; }
         </label>
         <div class="row">
             <label class="field grow" style="margin-bottom:0">
-                <span>自动刷新间隔（秒）</span>
-                <input id="interval" type="number" min="3" max="300" step="1" value="5">
+                <span>刷新间隔</span>
+                <select id="interval">
+                    <option value="0">手动（按 OK 刷新）</option>
+                    <option value="1">1 秒</option>
+                    <option value="3">3 秒</option>
+                    <option value="5" selected>5 秒</option>
+                    <option value="10">10 秒</option>
+                    <option value="15">15 秒</option>
+                    <option value="30">30 秒</option>
+                    <option value="60">60 秒</option>
+                    <option value="120">120 秒</option>
+                    <option value="300">300 秒</option>
+                </select>
             </label>
             <div class="tight">
                 <button class="primary" id="stocksSave" type="button" style="width:100%">保存自选股</button>
             </div>
         </div>
-        <div class="hint">支持 6 位代码（600519 → sh600519）或带交易所前缀的代码。指数请写 sh000001、sz399001。</div>
-        <table class="quotes">
+        <div class="hint">支持 6 位代码（600519 → sh600519）或带交易所前缀的代码。指数请写 sh000001、sz399001。自动刷新仅在交易时段（09:15-11:30、13:00-15:00），其余时间可手动刷新。</div>
+        <div class="positions-head">
+            <span>成本价与持仓</span>
+            <span class="tag">可选，填写后显示盈亏与今日盈亏</span>
+        </div>
+        <div class="positions" id="positionRows"></div>
+        <div class="position-actions">
+            <button class="primary" id="positionsSave" type="button">保存成本与持仓</button>
+            <span class="hint">盈亏 =（现价 − 成本价）× 持仓手数 × 100；今日盈亏 =（现价 − 昨收）× 持仓手数 × 100；留空表示不显示。</span>
+        </div>
+        <div class="quotes-wrap">
+        <table class="quotes" id="quoteTable">
             <thead>
-                <tr><th>名称 / 代码</th><th>现价</th><th>涨跌额</th><th>涨跌幅</th></tr>
+                <tr><th>名称 / 代码</th><th>现价</th><th>涨跌额</th><th>涨跌幅</th><th class="pnl-col">盈亏</th><th class="pnl-today-col">今日盈亏</th></tr>
             </thead>
             <tbody id="quoteRows">
-                <tr><td colspan="4" class="empty">还没有行情数据</td></tr>
+                <tr><td colspan="6" class="empty">还没有行情数据</td></tr>
             </tbody>
         </table>
+        </div>
     </section>
 
     <footer>
-        行情来自新浪财经，设备按设置间隔自动刷新。<br>
+        行情来自新浪财经，仅交易时段（09:15-11:30、13:00-15:00）自动刷新；手动模式按 OK 刷新。<br>
         热点名称与地址：<code id="footAp">FoloStock-</code> · <code>192.168.4.1</code>
     </footer>
 </div>
@@ -321,7 +380,10 @@ footer code { color: #b7c7db; }
 (function () {
     "use strict";
 
-    var state = { initialized: false, busy: false, timer: null, settingsDirty: false };
+    var state = {
+        initialized: false, busy: false, timer: null, settingsDirty: false,
+        positionsDirty: false, positionSignature: null, quoteItems: []
+    };
 
     function $(id) { return document.getElementById(id); }
 
@@ -375,8 +437,8 @@ footer code { color: #b7c7db; }
         if (typeof cache.ssid === "string") { $("ssid").value = cache.ssid; }
         if (typeof cache.pass === "string") { $("pass").value = cache.pass; }
         if (typeof cache.codes === "string") { $("codes").value = cache.codes; }
-        if (typeof cache.interval === "number" && cache.interval >= 3 && cache.interval <= 300) {
-            $("interval").value = cache.interval;
+        if (typeof cache.interval === "number" && cache.interval >= 0 && cache.interval <= 300) {
+            setIntervalValue(cache.interval);
         }
     }
 
@@ -414,6 +476,23 @@ footer code { color: #b7c7db; }
         if (number < min) return min;
         if (number > max) return max;
         return number;
+    }
+
+    // 设备可能保存了旧版自定义秒数;不在档位列表时临时补一个选项,避免值丢失。
+    function setIntervalValue(value) {
+        var select = $("interval");
+        var text = String(settingsInt(value, 5));
+        var found = false;
+        for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === text) { found = true; break; }
+        }
+        if (!found) {
+            var option = document.createElement("option");
+            option.value = text;
+            option.textContent = text + " 秒";
+            select.appendChild(option);
+        }
+        select.value = text;
     }
 
     function updateSettingsDisplay() {
@@ -479,6 +558,113 @@ footer code { color: #b7c7db; }
         }).then(function () {
             busy($("settingsSave"), false);
         });
+    }
+
+    function quoteNameMap(items) {
+        var names = {};
+        items = items || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] && items[i].code) { names[items[i].code] = items[i].name || ""; }
+        }
+        return names;
+    }
+
+    function updatePositionNames(items) {
+        var names = quoteNameMap(items);
+        var rows = $("positionRows").querySelectorAll(".position-row");
+        for (var i = 0; i < rows.length; i++) {
+            var name = names[rows[i].getAttribute("data-code")];
+            var node = rows[i].querySelector(".stock .name");
+            if (node && name) { node.textContent = name; }
+        }
+    }
+
+    // 只在自选股列表变化时重建输入框;轮询期间保留用户正在编辑的值。
+    function renderPositions(config, items) {
+        if (!config) return;
+        var codes = Array.isArray(config.codes) ? config.codes : [];
+        var signature = codes.join(",");
+        if (signature === state.positionSignature) {
+            updatePositionNames(items);
+            return;
+        }
+        state.positionSignature = signature;
+        state.positionsDirty = false;
+
+        var box = $("positionRows");
+        var button = $("positionsSave");
+        if (!codes.length) {
+            box.innerHTML = '<div class="empty">先保存自选股，再填写成本价与持仓</div>';
+            button.disabled = true;
+            return;
+        }
+        button.disabled = false;
+
+        var values = {};
+        var positions = Array.isArray(config.positions) ? config.positions : [];
+        for (var i = 0; i < positions.length; i++) {
+            if (positions[i] && positions[i].code) { values[positions[i].code] = positions[i]; }
+        }
+        var names = quoteNameMap(items);
+        var html = "";
+        for (var j = 0; j < codes.length; j++) {
+            var code = codes[j];
+            var position = values[code] || {};
+            var cost = Number(position.cost) > 0 ? String(position.cost) : "";
+            var lots = Number(position.lots) > 0 ? String(position.lots) : "";
+            html += '<div class="position-row" data-code="' + esc(code) + '">' +
+                '<div class="stock"><span class="name">' + esc(names[code] || code) + "</span>" +
+                '<span class="code">' + esc(code) + "</span></div>" +
+                '<label class="position-field"><span>成本价</span>' +
+                '<input class="cost" type="number" min="0" max="1000000" step="0.001" inputmode="decimal" value="' +
+                esc(cost) + '" placeholder="未设置"></label>' +
+                '<label class="position-field"><span>持仓（手）</span>' +
+                '<input class="lots" type="number" min="0" max="100000" step="1" inputmode="numeric" value="' +
+                esc(lots) + '" placeholder="未设置"></label>' +
+                "</div>";
+        }
+        box.innerHTML = html;
+    }
+
+    function collectPositions() {
+        var rows = $("positionRows").querySelectorAll(".position-row");
+        var items = [];
+        for (var i = 0; i < rows.length; i++) {
+            var costText = rows[i].querySelector(".cost").value.trim();
+            var lotsText = rows[i].querySelector(".lots").value.trim();
+            var cost = costText === "" ? 0 : Number(costText);
+            var lots = lotsText === "" ? 0 : Number(lotsText);
+            if (!isFinite(cost) || cost < 0 || cost > 1000000) {
+                toast("成本价需在 0 到 1000000 之间", true);
+                return null;
+            }
+            if (!isFinite(lots) || lots < 0 || lots > 100000 || Math.floor(lots) !== lots) {
+                toast("持仓手数需为 0 到 100000 的整数", true);
+                return null;
+            }
+            items.push({
+                code: rows[i].getAttribute("data-code"),
+                cost: cost,
+                lots: lots
+            });
+        }
+        return items;
+    }
+
+    function savePositions() {
+        var items = collectPositions();
+        if (!items) return;
+        busy($("positionsSave"), true);
+        api("/api/positions", { method: "POST", body: { positions: items } })
+            .then(function (data) {
+                state.positionsDirty = false;
+                state.positionSignature = null;
+                renderPositions(data.config, state.quoteItems);
+                toast("成本与持仓已保存");
+                schedule(500);
+            })
+            .catch(function (err) { toast(err.message, true); })
+            .then(function () { busy($("positionsSave"), false); });
     }
 
     function toast(message, isError) {
@@ -557,31 +743,48 @@ footer code { color: #b7c7db; }
             if (settings) {
                 $("ssid").value = settings.ssid;
                 $("codes").value = settings.codes;
-                $("interval").value = settings.interval;
+                setIntervalValue(settings.interval);
             }
             state.initialized = true;
         }
 
         renderSettings(data.config, data.device.ap_enabled);
-        renderQuotes(quotes.items || []);
+        state.quoteItems = quotes.items || [];
+        renderPositions(data.config, state.quoteItems);
+        renderQuotes(state.quoteItems);
     }
 
     function renderQuotes(items) {
         var body = $("quoteRows");
+        var table = $("quoteTable");
         if (!items.length) {
-            body.innerHTML = '<tr><td colspan="4" class="empty">还没有行情数据</td></tr>';
+            table.className = "quotes";
+            body.innerHTML = '<tr><td colspan="6" class="empty">还没有行情数据</td></tr>';
             return;
         }
+        var hasPnl = false;
+        var hasPnlToday = false;
+        for (var p = 0; p < items.length; p++) {
+            if (items[p].pnl) { hasPnl = true; }
+            if (items[p].pnl_today) { hasPnlToday = true; }
+        }
+        table.className = "quotes" + (hasPnl ? " with-pnl" : "") +
+            (hasPnlToday ? " with-pnl-today" : "");
         var html = "";
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             var cls = item.trend === "up" ? "up" : (item.trend === "down" ? "down" : "flat");
+            var pnlCls = item.pnl_trend === "up" ? "up" : (item.pnl_trend === "down" ? "down" : "flat");
+            var pnlTodayCls = item.pnl_today_trend === "up" ? "up" :
+                (item.pnl_today_trend === "down" ? "down" : "flat");
             html += "<tr>" +
                 '<td><span class="stock">' + esc(item.name || "等待行情") + "</span>" +
                 '<span class="code">' + esc(item.code) + "</span></td>" +
                 '<td class="' + cls + '">' + esc(item.price) + "</td>" +
                 '<td class="' + cls + '">' + esc(item.change) + "</td>" +
                 '<td class="' + cls + '">' + esc(item.pct) + "</td>" +
+                '<td class="pnl-col ' + pnlCls + '">' + esc(item.pnl || "") + "</td>" +
+                '<td class="pnl-today-col ' + pnlTodayCls + '">' + esc(item.pnl_today || "") + "</td>" +
                 "</tr>";
         }
         body.innerHTML = html;
@@ -629,13 +832,18 @@ footer code { color: #b7c7db; }
         var codes = $("codes").value.trim();
         var interval = parseInt($("interval").value, 10);
         if (!codes) { toast("请至少填写一只股票", true); return; }
-        if (!interval || interval < 3 || interval > 300) { toast("刷新间隔需在 3 到 300 秒之间", true); return; }
+        if (isNaN(interval) || interval < 0 || interval > 300) {
+            toast("刷新间隔需在 0 到 300 秒之间", true); return;
+        }
         busy($("stocksSave"), true);
         api("/api/config", { method: "POST", body: { codes: codes, interval: interval } })
             .then(function (data) {
                 $("codes").value = data.config.codes_text;
-                $("interval").value = data.config.interval;
+                setIntervalValue(data.config.interval);
                 applyDeviceSettings(data.config);
+                state.positionsDirty = false;
+                state.positionSignature = null;
+                renderPositions(data.config, state.quoteItems);
                 toast("已保存，设备开始刷新行情");
                 schedule(500);
             })
@@ -704,6 +912,10 @@ footer code { color: #b7c7db; }
 
     $("wifiSave").addEventListener("click", saveWifi);
     $("stocksSave").addEventListener("click", saveStocks);
+    $("positionsSave").addEventListener("click", savePositions);
+    $("positionRows").addEventListener("input", function () {
+        state.positionsDirty = true;
+    });
     $("scanBtn").addEventListener("click", scan);
     $("forgetBtn").addEventListener("click", forgetWifi);
     $("closePortal").addEventListener("click", closePortal);

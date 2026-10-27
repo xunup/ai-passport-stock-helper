@@ -62,6 +62,10 @@ run_static_checks() {
         -o "${test_dir}/test_stock_codes"
     "${test_dir}/test_stock_codes"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_stock_positions.c main/stock_positions.c -lm \
+        -o "${test_dir}/test_stock_positions"
+    "${test_dir}/test_stock_positions"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_quote_parse.c main/quote_parse.c main/gbk_table.c -lm \
         -o "${test_dir}/test_quote_parse"
     "${test_dir}/test_quote_parse"
@@ -74,9 +78,17 @@ run_static_checks() {
         -o "${test_dir}/test_ui_model"
     "${test_dir}/test_ui_model"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
-        tests/test_menu_model.c main/menu_model.c \
+        tests/test_menu_model.c main/menu_model.c main/refresh_options.c \
         -o "${test_dir}/test_menu_model"
     "${test_dir}/test_menu_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_refresh_options.c main/refresh_options.c \
+        -o "${test_dir}/test_refresh_options"
+    "${test_dir}/test_refresh_options"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_market_hours.c main/market_hours.c \
+        -o "${test_dir}/test_market_hours"
+    "${test_dir}/test_market_hours"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_roam_policy.c main/roam_policy.c \
         -o "${test_dir}/test_roam_policy"

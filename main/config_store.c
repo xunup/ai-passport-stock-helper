@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -13,6 +14,7 @@
 #define KEY_SSID "ssid"
 #define KEY_PASS "pass"
 #define KEY_CODES "codes"
+#define KEY_POSITIONS "positions"
 #define KEY_INTERVAL "interval"
 #define KEY_BRIGHTNESS "brightness"
 #define KEY_AUTO_OFF "auto_off"
@@ -33,11 +35,11 @@ static void unlock(void)
     if (s_lock) xSemaphoreGive(s_lock);
 }
 
-static uint16_t clamp_interval(int value)
+static uint16_t normalize_interval(int value)
 {
-    if (value < STOCK_CONFIG_INTERVAL_MIN) return STOCK_CONFIG_INTERVAL_MIN;
-    if (value > STOCK_CONFIG_INTERVAL_MAX) return STOCK_CONFIG_INTERVAL_MAX;
-    return (uint16_t)value;
+    if (value <= STOCK_CONFIG_INTERVAL_MANUAL) return STOCK_CONFIG_INTERVAL_MANUAL;
+    if (value > STOCK_CONFIG_INTERVAL_MAX) value = STOCK_CONFIG_INTERVAL_MAX;
+    return refresh_interval_normalize((uint16_t)value);
 }
 
 static uint8_t clamp_brightness(int value)
@@ -86,9 +88,16 @@ static void load_from_nvs(stock_config_t *cfg)
         }
     }
 
+    char positions_text[STOCK_POSITIONS_TEXT_MAX] = {0};
+    len = sizeof(positions_text);
+    if (nvs_get_str(handle, KEY_POSITIONS, positions_text, &len) == ESP_OK) {
+        stock_positions_parse(positions_text, cfg->codes, cfg->count,
+                              cfg->cost_price, cfg->lots);
+    }
+
     uint16_t interval = 0;
     if (nvs_get_u16(handle, KEY_INTERVAL, &interval) == ESP_OK) {
-        cfg->interval_sec = clamp_interval(interval);
+        cfg->interval_sec = normalize_interval(interval);
     }
 
     uint8_t value = 0;
@@ -170,12 +179,28 @@ esp_err_t config_store_save_config(const char *codes_text, int interval_sec)
 
     lock();
     stock_config_t next = s_config;
+    double cost_price[STOCK_CODES_MAX] = {0};
+    uint32_t lots[STOCK_CODES_MAX] = {0};
+    for (int i = 0; i < count; i++) {
+        for (int j = 0; j < next.count; j++) {
+            if (strcmp(parsed.codes[i], next.codes[j]) == 0) {
+                cost_price[i] = next.cost_price[j];
+                lots[i] = next.lots[j];
+                break;
+            }
+        }
+    }
     memcpy(next.codes, parsed.codes, sizeof(next.codes));
+    memcpy(next.cost_price, cost_price, sizeof(next.cost_price));
+    memcpy(next.lots, lots, sizeof(next.lots));
     next.count = count;
-    next.interval_sec = clamp_interval(interval_sec);
+    next.interval_sec = normalize_interval(interval_sec);
 
     char joined[STOCK_CODES_MAX * STOCK_CODE_LEN + 8];
-    if (stock_codes_join(joined, sizeof(joined), next.codes, next.count) < 0) {
+    char positions[STOCK_POSITIONS_TEXT_MAX];
+    if (stock_codes_join(joined, sizeof(joined), next.codes, next.count) < 0 ||
+        stock_positions_serialize(positions, sizeof(positions), next.codes,
+                                  next.cost_price, next.lots, next.count) < 0) {
         unlock();
         return ESP_ERR_INVALID_SIZE;
     }
@@ -185,8 +210,80 @@ esp_err_t config_store_save_config(const char *codes_text, int interval_sec)
     if (err == ESP_OK) {
         err = write_string(handle, KEY_CODES, joined);
         if (err == ESP_OK) {
+            err = write_string(handle, KEY_POSITIONS, positions);
+        }
+        if (err == ESP_OK) {
             err = nvs_set_u16(handle, KEY_INTERVAL, next.interval_sec);
         }
+        if (err == ESP_OK) err = nvs_commit(handle);
+        nvs_close(handle);
+    }
+    if (err == ESP_OK) s_config = next;
+    unlock();
+    return err;
+}
+
+esp_err_t config_store_save_interval(uint16_t interval_sec)
+{
+    if (!s_ready) return ESP_ERR_INVALID_STATE;
+
+    lock();
+    stock_config_t next = s_config;
+    next.interval_sec = normalize_interval(interval_sec);
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &handle);
+    if (err == ESP_OK) {
+        err = nvs_set_u16(handle, KEY_INTERVAL, next.interval_sec);
+        if (err == ESP_OK) err = nvs_commit(handle);
+        nvs_close(handle);
+    }
+    if (err == ESP_OK) s_config = next;
+    unlock();
+    return err;
+}
+
+esp_err_t config_store_save_positions(const stock_position_t *items, int count)
+{
+    if (!s_ready) return ESP_ERR_INVALID_STATE;
+    if (!items || count < 0 || count > STOCK_CODES_MAX) return ESP_ERR_INVALID_ARG;
+
+    lock();
+    stock_config_t next = s_config;
+    for (int i = 0; i < count; i++) {
+        char code[STOCK_CODE_LEN];
+        if (!stock_code_normalize(items[i].code, code) || !isfinite(items[i].cost) ||
+            items[i].cost < 0 || items[i].cost > STOCK_POSITION_COST_MAX ||
+            items[i].lots > STOCK_POSITION_LOTS_MAX) {
+            unlock();
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        bool found = false;
+        for (int j = 0; j < next.count; j++) {
+            if (strcmp(next.codes[j], code) != 0) continue;
+            next.cost_price[j] = items[i].cost;
+            next.lots[j] = items[i].lots;
+            found = true;
+            break;
+        }
+        if (!found) {
+            unlock();
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
+    char positions[STOCK_POSITIONS_TEXT_MAX];
+    if (stock_positions_serialize(positions, sizeof(positions), next.codes,
+                                  next.cost_price, next.lots, next.count) < 0) {
+        unlock();
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &handle);
+    if (err == ESP_OK) {
+        err = write_string(handle, KEY_POSITIONS, positions);
         if (err == ESP_OK) err = nvs_commit(handle);
         nvs_close(handle);
     }

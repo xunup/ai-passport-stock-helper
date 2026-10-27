@@ -12,8 +12,11 @@ typedef struct {
     int selected;
     int offset;
     bool wifi_connected;
+    bool wifi_connecting;
+    int rssi;
     int battery_pct;
     bool battery_ok;
+    bool market_open;
 } ui_list_view_t;
 
 typedef struct {
@@ -21,6 +24,8 @@ typedef struct {
     const char *status;
     const char *hint;
     bool wifi_connected;
+    bool wifi_connecting;
+    int rssi;
     int battery_pct;
     bool battery_ok;
 } ui_setup_view_t;
@@ -29,10 +34,13 @@ typedef struct {
     int selected;
     bool editing;
     int brightness;
+    int interval_sec;
     int auto_off_sec;
     bool auto_off_enabled;
     bool ap_enabled;
     bool wifi_connected;
+    bool wifi_connecting;
+    int rssi;
     int battery_pct;
     bool battery_ok;
 } ui_menu_view_t;

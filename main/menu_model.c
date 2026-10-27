@@ -1,6 +1,7 @@
-// main/menu_model.c —— 四行设置菜单的纯逻辑,不依赖 LVGL/ESP-IDF。
+// main/menu_model.c —— 五行设置菜单的纯逻辑,不依赖 LVGL/ESP-IDF。
 #include "menu_model.h"
 
+#include "refresh_options.h"
 #include "settings_limits.h"
 
 static uint8_t clamp_level(int value)
@@ -17,13 +18,14 @@ static uint8_t clamp_auto_off(int value)
     return (uint8_t)((value / SETTINGS_AUTO_OFF_STEP) * SETTINGS_AUTO_OFF_STEP);
 }
 
-void menu_model_init(menu_model_t *model, uint8_t brightness, uint8_t auto_off_sec,
-                     bool auto_off_enabled, bool ap_enabled)
+void menu_model_init(menu_model_t *model, uint8_t brightness, uint16_t interval_sec,
+                     uint8_t auto_off_sec, bool auto_off_enabled, bool ap_enabled)
 {
     if (!model) return;
     model->selected = MENU_ITEM_HOTSPOT;
     model->editing = false;
     model->brightness = clamp_level(brightness);
+    model->interval_sec = refresh_interval_normalize(interval_sec);
     model->auto_off_sec = clamp_auto_off(auto_off_sec);
     model->auto_off_enabled = auto_off_enabled;
     model->ap_enabled = ap_enabled;
@@ -38,6 +40,12 @@ menu_change_t menu_model_move(menu_model_t *model, int delta)
             const uint8_t before = model->brightness;
             model->brightness = clamp_level((int)model->brightness + delta);
             return model->brightness != before ? MENU_CHANGE_BRIGHTNESS : MENU_CHANGE_NONE;
+        }
+        if (model->selected == MENU_ITEM_REFRESH) {
+            const uint16_t before = model->interval_sec;
+            model->interval_sec = refresh_interval_step(model->interval_sec, delta);
+            return model->interval_sec != before ? MENU_CHANGE_REFRESH_INTERVAL
+                                                 : MENU_CHANGE_NONE;
         }
         if (model->selected == MENU_ITEM_AUTO_OFF_TIME) {
             const uint8_t before = model->auto_off_sec;
@@ -70,6 +78,10 @@ menu_activate_t menu_model_activate(menu_model_t *model)
     if (model->selected == MENU_ITEM_BRIGHTNESS) {
         model->editing = true;
         return MENU_ACTIVATE_EDIT_BRIGHTNESS;
+    }
+    if (model->selected == MENU_ITEM_REFRESH) {
+        model->editing = true;
+        return MENU_ACTIVATE_EDIT_REFRESH_INTERVAL;
     }
     if (model->selected == MENU_ITEM_AUTO_OFF) {
         model->auto_off_enabled = !model->auto_off_enabled;

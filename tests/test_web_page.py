@@ -19,10 +19,13 @@ REQUIRED_IDS = {
     "closePortal", "ssid", "pass", "wifiSave", "scanBtn", "forgetBtn", "networks",
     "codes", "interval", "stocksSave", "quoteRows", "footAp", "toast",
     "brightness", "brightnessValue", "autoOff", "autoOffHint", "autoOffTime",
-    "autoOffTimeField", "hotspot", "settingsSave",
+    "autoOffTimeField", "hotspot", "settingsSave", "positionRows", "positionsSave",
+    "quoteTable",
 }
 REQUIRED_TEXT = ("股票盯盘", "Wi-Fi 配网", "设备设置", "自选股", "屏幕亮度",
-                 "自动息屏", "息屏时间", "配网热点", "192.168.4.1", "新浪财经")
+                 "刷新间隔", "自动息屏", "息屏时间", "配网热点", "192.168.4.1", "新浪财经",
+                 "成本价", "持仓", "盈亏", "今日盈亏", "昨收", "交易时段")
+REFRESH_OPTIONS = ROOT / "main" / "refresh_options.c"
 ROUTE_RE = re.compile(r'register_handler\(s_server, "([^"]+)",\s*HTTP_(\w+)')
 FETCH_RE = re.compile(r'api\("(/[^"]*)"')
 EMOJI_RE = re.compile(
@@ -48,10 +51,20 @@ def main() -> None:
                    "@import", "url(http"):
         assert marker not in html, f"external asset reference: {marker}"
 
-    interval = re.search(r'<input id="interval"[^>]*>', html)
-    assert interval, "missing interval input"
-    assert 'min="3"' in interval.group(0) and 'max="300"' in interval.group(0), \
-        "interval bounds must match firmware (3-300)"
+    interval = re.search(r'<select id="interval">(.*?)</select>', html, re.S)
+    assert interval, "missing interval select"
+    assert 'value="0"' in interval.group(1), "interval select must offer manual refresh"
+    assert "按 OK" in interval.group(1), "manual refresh option must explain the OK key"
+
+    options = re.findall(r'<option value="(\d+)"', interval.group(1))
+    preset_source = REFRESH_OPTIONS.read_text(encoding="utf-8")
+    preset_block = re.search(
+        r"kRefreshIntervalPresets\[[^\]]*\]\s*=\s*\{([^}]*)\}", preset_source, re.S)
+    assert preset_block, "missing refresh interval preset table"
+    presets = re.findall(r"\b(\d+)\b", preset_block.group(1))
+    assert options == presets, \
+        f"web interval options {options} must match firmware presets {presets}"
+    assert "setIntervalValue(" in html, "page must restore non-preset saved intervals"
     assert 'type="password"' in html, "Wi-Fi password field must be masked"
 
     brightness = re.search(r'<input id="brightness"[^>]*>', html)
@@ -71,7 +84,7 @@ def main() -> None:
         assert any(route_path == path for route_path, _ in routes), \
             f"page calls unregistered endpoint {path}"
     for path in ("/api/status", "/api/config", "/api/settings", "/api/scan", "/api/wifi",
-                 "/api/wifi/forget", "/api/portal/close"):
+                 "/api/wifi/forget", "/api/portal/close", "/api/positions"):
         assert path in calls, f"page never calls {path}"
 
     assert "function esc(" in html, "dynamic HTML must be escaped"
@@ -88,9 +101,15 @@ def main() -> None:
 
     add_config = re.search(r"static void add_config\(.*?\n\}", server, re.S)
     assert add_config, "missing config serializer"
-    for field in ("brightness", "auto_off_sec", "auto_off_enabled"):
+    for field in ("brightness", "auto_off_sec", "auto_off_enabled", "positions"):
         assert f'"{field}"' in add_config.group(0), f"config API must expose {field}"
     assert "settings_post" in server, "missing device settings endpoint"
+    assert "positions_post" in server, "missing cost/lots endpoint"
+    assert '"pnl"' in server, "status API must expose profit/loss"
+    assert '"pnl_today"' in server, "status API must expose today's profit/loss"
+    assert '"pnl_today_trend"' in server, "status API must expose today's trend"
+    assert "pnl-today-col" in html, "page must render a today profit/loss column"
+    assert "with-pnl-today" in html, "today column must hide when no position is set"
     assert "renderSettings(data.config, data.device.ap_enabled)" in html, \
         "page must render the menu settings from device state"
     assert "state.settingsDirty" in html, "unsaved settings must survive polling"
