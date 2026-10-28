@@ -45,10 +45,25 @@ typedef struct {
     bool battery_ok;
 } ui_menu_view_t;
 
+typedef struct {
+    const char *code;
+    const char *name;             // 列表里的 UTF-8 名称,可为空
+    const quote_detail_t *detail; // 五档/市值/市盈率/分时
+    const char *status;           // 提示位替代文案(网络/错误),空闲时为 NULL
+    bool fetching;                // 刷新进行中,显示旋转指示
+    bool wifi_connected;
+    bool wifi_connecting;
+    int rssi;
+    int battery_pct;
+    bool battery_ok;
+} ui_detail_view_t;
+
 void ui_app_init(void);
 void ui_app_show_list(void);
 void ui_app_show_setup(void);
 void ui_app_show_menu(void);
+void ui_app_show_detail(void);
 void ui_app_update_list(const ui_list_view_t *view);
 void ui_app_update_setup(const ui_setup_view_t *view);
 void ui_app_update_menu(const ui_menu_view_t *view);
+void ui_app_update_detail(const ui_detail_view_t *view);

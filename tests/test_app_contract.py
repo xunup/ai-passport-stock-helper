@@ -59,7 +59,7 @@ class AppWiringTest(unittest.TestCase):
         self.assertNotIn("lv_", self.wifi)
         self.assertNotIn("lv_", self.quotes)
         for name in ("ui_app_init", "ui_app_update_list", "ui_app_update_setup",
-                     "ui_app_update_menu"):
+                     "ui_app_update_menu", "ui_app_update_detail", "ui_app_show_detail"):
             body = function_body(self.ui, name)
             self.assertIn("bsp_lvgl_lock(", body)
             self.assertIn("bsp_lvgl_unlock(", body)
@@ -122,7 +122,8 @@ class AppWiringTest(unittest.TestCase):
     def test_wifi_indicator_reflects_connection_on_every_screen(self) -> None:
         self.assertIn("#define WIFI_BAR_COUNT 4", self.ui)
         self.assertIn("wifi_signal_level", self.ui)
-        for name in ("ui_app_update_list", "ui_app_update_setup", "ui_app_update_menu"):
+        for name in ("ui_app_update_list", "ui_app_update_setup", "ui_app_update_menu",
+                     "ui_app_update_detail"):
             body = function_body(self.ui, name)
             self.assertIn("set_wifi(", body)
         self.assertIn(".wifi_connected = wifi->sta_connected", self.controller)
@@ -162,6 +163,47 @@ class AppWiringTest(unittest.TestCase):
         self.assertIn('"pnl"', server)
         self.assertIn('"pnl_today"', server)
         self.assertIn("stock_position_today_profit", server)
+
+    def test_detail_page_opens_on_ok_and_shares_refresh_cadence(self) -> None:
+        self.assertIn("open_detail()", self.controller)
+        self.assertIn("close_detail()", self.controller)
+        self.assertIn("quote_worker_set_detail", self.controller)
+        self.assertIn("quote_worker_detail", self.controller)
+        self.assertIn("detail_generation", self.controller)
+        self.assertIn("ui_app_show_detail", self.ui)
+        self.assertIn("ui_app_update_detail", self.ui)
+        # 详情与列表在同一次轮询里拉取,刷新节奏与手动模式完全一致。
+        body = function_body(self.quotes, "poll_once")
+        self.assertIn("poll_list()", body)
+        self.assertIn("poll_detail()", body)
+        self.assertIn("quote_parse_tencent_detail", self.quotes)
+        self.assertIn("quote_parse_minute_list", self.quotes)
+
+        header = read("main/quote_parse.h")
+        for token in ("volume_hand", "market_cap_yi", "pe", "open", "high", "low", "ask[",
+                      "bid[", "minute[", "minute_slot["):
+            self.assertIn(token, header)
+
+        self.assertIn("lv_line_create", self.ui)
+        self.assertIn("lv_font_cn_12_detail", self.ui)
+        self.assertIn("无分时数据", self.ui)
+        # 时间刻度已移除,开盘/午休/收盘改用面板内的竖分隔线定位。
+        self.assertNotIn("11:30/13:00", self.ui)
+        self.assertIn("chart_slot_x", self.ui)
+        self.assertIn("separator_slots", self.ui)
+        # 详情页与列表共用同一轮刷新:旋转指示覆盖整轮,按 fetching 显示。
+        self.assertIn(".fetching = quotes->fetching", self.controller)
+        detail_body = function_body(self.ui, "ui_app_update_detail")
+        self.assertIn("view->fetching", detail_body)
+        self.assertIn("s_detail_refresh", detail_body)
+        body = function_body(self.quotes, "poll_once")
+        self.assertLess(body.index("set_fetching(true)"), body.index("poll_list()"))
+        self.assertGreater(body.index("set_fetching(false)"), body.index("poll_detail()"))
+        self.assertIn("短按 OK 刷新", self.ui)
+        self.assertIn("长按 OK 返回", self.ui)
+        for text in ("额", "市值", "卖一", "买一", "高", "开", "低"):
+            self.assertIn(text, self.ui)
+        self.assertIn("range_value", self.ui)
 
 
 if __name__ == "__main__":

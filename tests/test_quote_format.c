@@ -48,6 +48,30 @@ static void test_signed(void)
     assert(strcmp(text, "0.00%") == 0);
 }
 
+static void test_compact(void)
+{
+    char text[24];
+    quote_format_compact(text, sizeof(text), 47163);
+    assert(strcmp(text, "4.72万") == 0);
+    quote_format_compact(text, sizeof(text), 56441204);
+    assert(strcmp(text, "5644万") == 0);
+    quote_format_compact(text, sizeof(text), 123456789);
+    assert(strcmp(text, "1.23亿") == 0);
+    quote_format_compact(text, sizeof(text), 0);
+    assert(strcmp(text, "0") == 0);
+    quote_format_compact(text, sizeof(text), -5);
+    assert(strcmp(text, "0") == 0);
+    quote_format_compact(text, sizeof(text), NAN);
+    assert(strcmp(text, "0") == 0);
+
+    quote_format_market_cap(text, sizeof(text), 3273.96);
+    assert(strcmp(text, "3274.0亿") == 0);
+    quote_format_market_cap(text, sizeof(text), 641444.37);
+    assert(strcmp(text, "64.1万亿") == 0);
+    quote_format_market_cap(text, sizeof(text), 0);
+    assert(strcmp(text, "--") == 0);
+}
+
 static void test_trend(void)
 {
     assert(quote_trend(0.01) == QUOTE_TREND_UP);
@@ -63,6 +87,7 @@ int main(void)
     test_decimals();
     test_price();
     test_signed();
+    test_compact();
     test_trend();
     puts("quote format tests: PASS");
     return 0;

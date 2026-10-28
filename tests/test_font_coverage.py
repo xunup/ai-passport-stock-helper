@@ -12,6 +12,8 @@ FONT_DIR = ROOT / "assets" / "fonts"
 FONTS = (FONT_DIR / "lv_font_cn_16.c", FONT_DIR / "lv_font_cn_22.c")
 PNL_FONT = FONT_DIR / "lv_font_cn_12_pnl.c"
 PNL_CHARS = "总今万亿"
+DETAIL_FONT = FONT_DIR / "lv_font_cn_12_detail.c"
+DETAIL_CHARS = "额市值亿万千买卖一二三四五短按刷新长返回网络未连接获取失败中无数据分时高开低"
 
 # Keep in sync with COMMON_SYMBOLS in tools/gen_cjk_font.py.
 SYMBOLS = "，。！？：；、‘’“”（）【】《》…—·￥↑↓"
@@ -122,6 +124,26 @@ def main() -> None:
     assert "今" in (ROOT / "main" / "ui_app.c").read_text(encoding="utf-8"), \
         "UI no longer uses the compact P/L font's glyphs"
     print(f"{PNL_FONT.name}: {len(pnl_chars)} codepoints, {pnl_sparse} CJK glyphs, P/L text covered")
+
+    detail_covered, detail_sparse = font_coverage(DETAIL_FONT)
+    detail_glyphs = {chr(codepoint) for codepoint in detail_covered}
+    assert detail_sparse == len(set(DETAIL_CHARS)), \
+        f"{DETAIL_FONT.name}: sparse glyphs={detail_sparse}, expected {len(set(DETAIL_CHARS))}"
+    detail_required = {chr(c) for c in range(0x20, 0x7F)} | set(DETAIL_CHARS)
+    detail_missing = detail_required - detail_glyphs
+    assert not detail_missing, (
+        f"{DETAIL_FONT.name}: missing {len(detail_missing)} glyphs: "
+        + " ".join(f"U+{ord(ch):04X}({ch})" for ch in sorted(detail_missing)[:12]))
+    ui_source = (ROOT / "main" / "ui_app.c").read_text(encoding="utf-8")
+    assert "lv_font_cn_12_detail" in ui_source, "detail font is no longer referenced by the UI"
+    detail_literals = "无分时数据 短按 OK 刷新   长按 OK 返回 详情 额 市值 卖一 买一 高 开 低"
+    literal_missing = {ch for ch in detail_literals if ord(ch) > 0x7F} - detail_glyphs \
+        - {chr(codepoint) for codepoint in font_coverage(FONTS[0])[0]}
+    assert not literal_missing, (
+        f"detail labels use uncovered glyphs: "
+        + " ".join(f"U+{ord(ch):04X}({ch})" for ch in sorted(literal_missing)))
+    print(f"{DETAIL_FONT.name}: {len(detail_glyphs)} codepoints, {detail_sparse} CJK glyphs, "
+          "detail text covered")
 
     print(f"UI glyphs checked: {len(ui_chars)}; font coverage tests: PASS")
 

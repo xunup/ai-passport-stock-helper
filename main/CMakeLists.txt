@@ -17,6 +17,7 @@ idf_component_register(
          "ui_model.c"
          "web_server.c"
          "wifi_app.c"
+         "../assets/fonts/lv_font_cn_12_detail.c"
          "../assets/fonts/lv_font_cn_12_pnl.c"
          "../assets/fonts/lv_font_cn_16.c"
          "../assets/fonts/lv_font_cn_22.c"

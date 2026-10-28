@@ -52,6 +52,47 @@ void quote_format_percent(char *out, size_t size, double pct)
     snprintf(out, size, "%+.2f%%", pct);
 }
 
+void quote_format_compact(char *out, size_t size, double value)
+{
+    if (!out || size == 0) return;
+    if (!isfinite(value) || value <= 0) {
+        snprintf(out, size, "0");
+        return;
+    }
+    if (value >= 1e8) {
+        const double scaled = value / 1e8;
+        if (scaled < 10) {
+            snprintf(out, size, "%.2f亿", scaled);
+        } else {
+            snprintf(out, size, "%.0f亿", scaled);
+        }
+    } else if (value >= 1e4) {
+        const double scaled = value / 1e4;
+        if (scaled < 10) {
+            snprintf(out, size, "%.2f万", scaled);
+        } else {
+            snprintf(out, size, "%.0f万", scaled);
+        }
+    } else {
+        snprintf(out, size, "%.0f", value);
+    }
+}
+
+void quote_format_market_cap(char *out, size_t size, double yi)
+{
+    if (!out || size == 0) return;
+    if (!isfinite(yi) || yi <= 0) {
+        snprintf(out, size, "--");
+        return;
+    }
+    // 保留一位小数;超过一万亿改用万亿,免得撑爆市值那一列。
+    if (yi >= 1e4) {
+        snprintf(out, size, "%.1f万亿", yi / 1e4);
+    } else {
+        snprintf(out, size, "%.1f亿", yi);
+    }
+}
+
 quote_trend_t quote_trend(double change)
 {
     if (!isfinite(change)) return QUOTE_TREND_FLAT;

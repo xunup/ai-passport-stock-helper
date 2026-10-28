@@ -49,6 +49,10 @@ static bool s_wifi_error;
 static int s_battery_pct = -1;
 static bool s_battery_ok;
 static bool s_menu_open;
+static bool s_detail_open;
+static bool s_portal;
+static char s_detail_code[STOCK_CODE_LEN];
+static quote_detail_t s_detail_data;
 static bool s_screen_off;
 static bool s_swallow_wake;
 static bool s_long_pressed[BSP_BTN_COUNT];
@@ -82,6 +86,29 @@ static bool stock_config_equal(const stock_config_t *a, const stock_config_t *b)
            memcmp(a->codes, b->codes, sizeof(a->codes)) == 0 &&
            memcmp(a->cost_price, b->cost_price, sizeof(a->cost_price)) == 0 &&
            memcmp(a->lots, b->lots, sizeof(a->lots)) == 0;
+}
+
+static bool config_has_code(const stock_config_t *config, const char *code)
+{
+    for (int i = 0; i < config->count; i++) {
+        if (strcmp(config->codes[i], code) == 0) return true;
+    }
+    return false;
+}
+
+static void close_detail(void)
+{
+    s_detail_open = false;
+    s_detail_code[0] = '\0';
+    quote_worker_set_detail(NULL);
+}
+
+static void open_detail(void)
+{
+    if (s_model.selected < 0 || s_model.selected >= s_config.count) return;
+    snprintf(s_detail_code, sizeof(s_detail_code), "%s", s_config.codes[s_model.selected]);
+    s_detail_open = true;
+    quote_worker_set_detail(s_detail_code);
 }
 
 // 网页与设备菜单共用 config_store;本循环同时收敛亮度和热点等菜单设置。
@@ -126,6 +153,8 @@ static bool apply_new_config(void)
             s_menu.auto_off_enabled = s_auto_off_enabled;
             s_menu.ap_enabled = s_ap_enabled;
         }
+        // 详情页跟着自选股走:股票被删掉就退回列表。
+        if (s_detail_open && !config_has_code(&s_config, s_detail_code)) close_detail();
     }
     return changed;
 }
@@ -258,6 +287,36 @@ static void render_list(const wifi_app_info_t *wifi, const quote_snapshot_t *quo
     ui_app_update_list(&view);
 }
 
+static void render_detail(const wifi_app_info_t *wifi, const quote_snapshot_t *quotes)
+{
+    quote_worker_detail(&s_detail_data);
+    const quote_t *quote = quote_list_find(quotes->quotes, (size_t)quotes->count, s_detail_code);
+    const char *status = NULL;
+    if (!s_detail_data.valid) {
+        if (!wifi->sta_connected) {
+            status = "网络未连接";
+        } else if (quotes->error[0]) {
+            status = "获取失败";
+        } else {
+            status = "获取中...";
+        }
+    }
+    ui_detail_view_t view = {
+        .code = s_detail_code,
+        .name = quote && quote->name[0] ? quote->name : NULL,
+        .detail = &s_detail_data,
+        .status = status,
+        .fetching = quotes->fetching,
+        .wifi_connected = wifi->sta_connected,
+        .wifi_connecting = wifi_is_connecting(wifi),
+        .rssi = wifi->rssi,
+        .battery_pct = s_battery_pct,
+        .battery_ok = s_battery_ok,
+    };
+    ui_app_show_detail();
+    ui_app_update_detail(&view);
+}
+
 static void render_menu(const wifi_app_info_t *wifi)
 {
     ui_menu_view_t view = {
@@ -282,6 +341,7 @@ static void controller_task(void *arg)
 {
     (void)arg;
     uint32_t last_quote_generation = UINT32_MAX;
+    uint32_t last_detail_generation = UINT32_MAX;
     bool last_portal = false;
     bool last_connected = false;
     int last_battery = -2;
@@ -331,6 +391,8 @@ static void controller_task(void *arg)
                 if (btn == BSP_BTN_OK) {
                     if (s_menu_open) {
                         s_menu_open = false;
+                    } else if (s_detail_open) {
+                        close_detail();
                     } else {
                         open_menu();
                     }
@@ -350,13 +412,21 @@ static void controller_task(void *arg)
                         if (action == MENU_ACTIVATE_TOGGLE_HOTSPOT) toggle_hotspot();
                         dirty = true;
                     }
+                } else if (!long_pressed && s_detail_open) {
+                    // 详情页短按 OK 立即重拉一次,手动刷新模式下也能用。
+                    if (btn == BSP_BTN_OK) quote_worker_request_refresh();
                 } else if (!long_pressed) {
                     if (btn == BSP_BTN_UP) {
                         dirty = ui_model_move(&s_model, -1) || dirty;
                     } else if (btn == BSP_BTN_DOWN) {
                         dirty = ui_model_move(&s_model, 1) || dirty;
                     } else if (btn == BSP_BTN_OK) {
-                        quote_worker_request_refresh();
+                        if (!s_portal && s_config.count > 0) {
+                            open_detail();
+                        } else {
+                            quote_worker_request_refresh();
+                        }
+                        dirty = true;
                     }
                 }
             }
@@ -370,6 +440,10 @@ static void controller_task(void *arg)
             last_quote_generation = snapshot.generation;
             dirty = true;
         }
+        if (snapshot.detail_generation != last_detail_generation) {
+            last_detail_generation = snapshot.detail_generation;
+            dirty = true;
+        }
 
         wifi_app_info_t wifi;
         wifi_app_get_info(&wifi);
@@ -379,6 +453,7 @@ static void controller_task(void *arg)
             dirty = true;
         }
         const bool portal = s_wifi_error || wifi.portal || s_config.count == 0;
+        s_portal = portal;
         const bool just_connected = wifi.sta_connected && !last_connected;
         if (portal != last_portal || wifi.sta_connected != last_connected) {
             last_portal = portal;
@@ -424,6 +499,8 @@ static void controller_task(void *arg)
         if (dirty && !s_screen_off) {
             if (s_menu_open) {
                 render_menu(&wifi);
+            } else if (s_detail_open) {
+                render_detail(&wifi, &snapshot);
             } else if (portal) {
                 render_setup(&wifi);
             } else {

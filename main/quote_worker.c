@@ -22,6 +22,8 @@ static const char *TAG = "quote_worker";
 
 #define QUOTE_URL_MAX 160
 #define QUOTE_BODY_MAX 4096
+#define QUOTE_DETAIL_BODY_MAX 2048
+#define QUOTE_MINUTE_BODY_MAX 7168
 #define QUOTE_TASK_STACK 6144
 #define QUOTE_TASK_PRIORITY 5
 #define QUOTE_RETRY_MS 1500
@@ -42,7 +44,14 @@ static char s_error[48];
 static int64_t s_last_success_ms;
 static uint32_t s_generation;
 
+static char s_detail_code[STOCK_CODE_LEN];
+static quote_detail_t s_detail;
+static quote_detail_t s_detail_next;
+static uint32_t s_detail_generation;
+
 static char s_body[QUOTE_BODY_MAX];
+static char s_detail_body[QUOTE_DETAIL_BODY_MAX];
+static char s_minute_body[QUOTE_MINUTE_BODY_MAX];
 
 static void set_state(bool last_ok, const char *error)
 {
@@ -125,7 +134,7 @@ static esp_err_t fetch_body(const char *url, char *body, size_t body_size, size_
     return err;
 }
 
-static void poll_once(void)
+static void poll_list(void)
 {
     char codes[sizeof(s_codes)];
     uint16_t interval = 5;
@@ -136,11 +145,6 @@ static void poll_once(void)
         vTaskDelay(pdMS_TO_TICKS(2000));
         return;
     }
-    if (!wifi_app_sta_connected()) {
-        set_state(false, "Wi-Fi 未连接");
-        vTaskDelay(pdMS_TO_TICKS(QUOTE_RETRY_MS));
-        return;
-    }
 
     char url[QUOTE_URL_MAX];
     const int url_len = snprintf(url, sizeof(url), "http://hq.sinajs.cn/list=%s", codes);
@@ -149,11 +153,9 @@ static void poll_once(void)
         return;
     }
 
-    set_fetching(true);
     size_t body_len = 0;
     esp_err_t err = fetch_body(url, s_body, sizeof(s_body), &body_len);
     if (err != ESP_OK) {
-        set_fetching(false);
         ESP_LOGW(TAG, "行情请求失败: %s", esp_err_to_name(err));
         set_state(false, "行情服务器无响应");
         return;
@@ -163,7 +165,6 @@ static void poll_once(void)
     const size_t parsed_count =
         quote_parse_response(s_body, body_len, parsed, STOCK_CODES_MAX);
     if (parsed_count == 0) {
-        set_fetching(false);
         ESP_LOGW(TAG, "行情解析失败 (%u 字节)", (unsigned)body_len);
         set_state(false, "行情解析失败");
         return;
@@ -173,7 +174,6 @@ static void poll_once(void)
         memcpy(s_quotes, parsed, parsed_count * sizeof(parsed[0]));
         s_count = (int)parsed_count;
         s_has_data = true;
-        s_fetching = false;
         s_last_ok = true;
         s_error[0] = '\0';
         s_last_success_ms = esp_timer_get_time() / 1000;
@@ -181,6 +181,70 @@ static void poll_once(void)
         xSemaphoreGive(s_lock);
     }
     ESP_LOGI(TAG, "已更新 %u 条行情", (unsigned)parsed_count);
+}
+
+// 详情页:五档/市值/市盈率来自腾讯,当日分时来自新浪;与列表同一次轮询触发。
+static void poll_detail(void)
+{
+    char code[STOCK_CODE_LEN] = {0};
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        snprintf(code, sizeof(code), "%s", s_detail_code);
+        // 分时数据先沿用上一次,避免某一次分时请求失败就把图清空。
+        s_detail_next = s_detail;
+        xSemaphoreGive(s_lock);
+    }
+    if (code[0] == '\0') return;
+
+    char url[QUOTE_URL_MAX];
+    int url_len = snprintf(url, sizeof(url), "http://qt.gtimg.cn/q=%s", code);
+    if (url_len < 0 || (size_t)url_len >= sizeof(url)) return;
+
+    size_t body_len = 0;
+    esp_err_t err = fetch_body(url, s_detail_body, sizeof(s_detail_body), &body_len);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "详情请求失败: %s", esp_err_to_name(err));
+        return;
+    }
+    if (!quote_parse_tencent_detail(s_detail_body, body_len, &s_detail_next)) {
+        ESP_LOGW(TAG, "详情解析失败 (%u 字节)", (unsigned)body_len);
+        return;
+    }
+
+    url_len = snprintf(url, sizeof(url),
+                       "http://vip.stock.finance.sina.com.cn/quotes_service/view/vML_DataList.php"
+                       "?symbol=%s&num=%u",
+                       code, (unsigned)QUOTE_MINUTE_MAX);
+    if (url_len > 0 && (size_t)url_len < sizeof(url) &&
+        fetch_body(url, s_minute_body, sizeof(s_minute_body), &body_len) == ESP_OK) {
+        const size_t points = quote_parse_minute_list(s_minute_body, body_len,
+                                                      s_detail_next.minute,
+                                                      s_detail_next.minute_slot,
+                                                      QUOTE_MINUTE_MAX);
+        s_detail_next.minute_count = (uint16_t)points;
+    }
+
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
+        // 抓取期间可能已退出详情或换股,只提交仍然有效的代码。
+        if (strcmp(s_detail_code, code) == 0) {
+            s_detail = s_detail_next;
+            s_detail_generation++;
+        }
+        xSemaphoreGive(s_lock);
+    }
+}
+
+static void poll_once(void)
+{
+    if (!wifi_app_sta_connected()) {
+        set_state(false, "Wi-Fi 未连接");
+        vTaskDelay(pdMS_TO_TICKS(QUOTE_RETRY_MS));
+        return;
+    }
+    // 旋转指示覆盖整轮刷新,列表页与详情页看到的是同一段“获取中”。
+    set_fetching(true);
+    poll_list();
+    poll_detail();
+    set_fetching(false);
 }
 
 // 未对时时不拦截自动刷新,避免时间无效导致行情永远不更新。
@@ -323,10 +387,41 @@ void quote_worker_snapshot(quote_snapshot_t *out)
     out->has_data = s_has_data;
     out->fetching = s_fetching;
     out->generation = s_generation;
+    out->detail_generation = s_detail_generation;
     snprintf(out->error, sizeof(out->error), "%s", s_error);
     if (s_has_data) {
         const int64_t age_ms = esp_timer_get_time() / 1000 - s_last_success_ms;
         out->age_sec = age_ms > 0 ? (uint32_t)(age_ms / 1000) : 0;
     }
     xSemaphoreGive(s_lock);
+}
+
+void quote_worker_set_detail(const char *code)
+{
+    if (!s_lock) return;
+    char next[STOCK_CODE_LEN] = {0};
+    if (code && code[0]) snprintf(next, sizeof(next), "%s", code);
+
+    bool changed = false;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        changed = strcmp(next, s_detail_code) != 0;
+        if (changed) {
+            snprintf(s_detail_code, sizeof(s_detail_code), "%s", next);
+            memset(&s_detail, 0, sizeof(s_detail));
+            s_detail_generation++;
+        }
+        xSemaphoreGive(s_lock);
+    }
+    if (changed && next[0]) quote_worker_request_refresh();
+}
+
+void quote_worker_detail(quote_detail_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!s_lock) return;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
+        *out = s_detail;
+        xSemaphoreGive(s_lock);
+    }
 }

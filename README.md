@@ -27,8 +27,9 @@ menu. The device UI and web page are in Simplified Chinese.
 
 ## Features
 
-- **Live watchlist:** up to 8 A-share, index, or ETF codes, refreshed on a selectable interval (1/3/5/10/15/30/60/120/300 s, default 5) or manually only when OK is pressed. Press OK on the quote list to refresh immediately.
+- **Live watchlist:** up to 8 A-share, index, or ETF codes, refreshed on a selectable interval (1/3/5/10/15/30/60/120/300 s, default 5) or manually only when OK is pressed. Press OK on a selected row to open its detail page.
 - **Readable at a glance:** four rows per screen with name, code, current price, change, and change percentage. Gains are red and losses are green, following the Chinese market convention. ETF prices use three decimals; other instruments use two.
+- **Stock detail:** OK on a selected row opens a detail page with name, price and change, today's turnover, total market cap (one decimal), trailing P/E, high/open/low, the five-level bid/ask book, and an intraday price curve plotted on a fixed 09:30–15:00 axis (vertical separators mark the open, the lunch break, and the close; during the session the curve stops at the current minute and the rest of the axis stays empty). The detail data is fetched in the same poll as the list, so it shares the refresh preset, trading-hours gate, and manual mode; short OK refreshes immediately and long OK returns to the list.
 - **Optional profit/loss:** each watchlist entry can store a cost price and position size in lots. When both are set, the row shows holding profit/loss and today's profit/loss side by side in the same compact style as the change percentage, each prefixed with a short total/today label and colored by its own direction; entries without both values show neither.
 - **Status chrome:** a four-bar Wi-Fi strength indicator (1–4 lit bars by RSSI; blue when connected, pulsing amber while connecting, grey when offline), an optional CW2017 battery percentage, and a 24-hour clock in the header (UTC+8 after network time sync; `--:--` until synced), plus a status line for network state, quote errors, and the active refresh interval, with a spinner shown while a refresh is in progress.
 - **On-device settings:** provisioning hotspot switch, five brightness levels (20–100% backlight), refresh interval presets, auto screen-off switch, and a 5–60 second timeout in 5-second steps.
@@ -41,7 +42,8 @@ menu. The device UI and web page are in Simplified Chinese.
 
 | Context | UP / DOWN | OK | Long OK |
 | --- | --- | --- | --- |
-| Quote list | Move selection | Refresh quotes now | Open settings |
+| Quote list | Move selection | Open the stock detail page | Open settings |
+| Stock detail | — | Refresh quotes now | Back to the quote list |
 | Settings menu | Select a row; adjust the value while editing | Toggle a switch, or enter/finish editing | Close settings |
 | Setup screen | — | — | Open settings |
 | Screen off | Wake the screen | Wake the screen | Wake the screen |
@@ -109,7 +111,7 @@ The embedded page is served from flash and uses these endpoints:
 
 ## Quotes and limitations
 
-- Quote data comes from the Sina Finance endpoint at `hq.sinajs.cn`. An internet connection and 2.4 GHz Wi-Fi are required; the ESP32-C3 does not support 5 GHz.
+- Quote data comes from the Sina Finance endpoint at `hq.sinajs.cn`; the detail page takes turnover, market cap, P/E, and the order book from Tencent `qt.gtimg.cn`, and its intraday series from `vip.stock.finance.sina.com.cn`. An internet connection and 2.4 GHz Wi-Fi are required; the ESP32-C3 does not support 5 GHz.
 - Quotes may be delayed and are provided for reference only. This firmware does not place orders and is not investment advice.
 - Holding profit/loss uses (current price − cost price) × lots × 100 shares; today's profit/loss uses (current price − previous close) × lots × 100 shares. Both exclude fees, taxes, and dividends and are for reference only.
 - The UI fonts cover GB2312 level-one Hanzi and 23 UI punctuation marks; a compact 12px font renders the profit/loss line. Stock names containing other characters display those characters as `?`.

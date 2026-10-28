@@ -12,9 +12,11 @@
 #include "esp_system.h"
 #include "lvgl.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+LV_FONT_DECLARE(lv_font_cn_12_detail);
 LV_FONT_DECLARE(lv_font_cn_12_pnl);
 LV_FONT_DECLARE(lv_font_cn_16);
 LV_FONT_DECLARE(lv_font_cn_22);
@@ -78,6 +80,23 @@ LV_FONT_DECLARE(lv_font_montserrat_20);
 #define BATTERY_LABEL_LEFT 194
 #define BATTERY_LABEL_WIDTH 34
 
+// 详情页:报价区 + 额/市值/PE + 高/开/低 + 分时面板 + 两列五档。
+#define DETAIL_METRIC_TOP 90
+#define DETAIL_METRIC_HEIGHT 17
+#define DETAIL_RANGE_TOP 107
+#define DETAIL_DIVIDER_TOP 126
+#define DETAIL_CHART_LEFT 12
+#define DETAIL_CHART_TOP 128
+#define DETAIL_CHART_WIDTH 216
+#define DETAIL_CHART_HEIGHT 68
+#define DETAIL_CHART_INSET 2
+#define DETAIL_BOOK_TOP 202
+#define DETAIL_BOOK_ROW_HEIGHT 19
+#define DETAIL_BOOK_ASK_LEFT 12
+#define DETAIL_BOOK_BID_LEFT 122
+#define DETAIL_HINT_TOP 300
+#define DETAIL_TEXT_HEIGHT 17
+
 typedef struct {
     lv_obj_t *screen;
     lv_obj_t *clock;
@@ -106,11 +125,36 @@ typedef struct {
     lv_obj_t *bars[BRIGHTNESS_BAR_COUNT];
 } menu_row_widgets_t;
 
+typedef struct {
+    lv_obj_t *label;
+    lv_obj_t *price;
+    lv_obj_t *volume;
+} book_cell_t;
+
+typedef struct {
+    lv_obj_t *name;
+    lv_obj_t *code;
+    lv_obj_t *price;
+    lv_obj_t *change;
+    lv_obj_t *metric_value[3];
+    lv_obj_t *range_value[3];  // 高/开/低
+    lv_obj_t *chart;
+    lv_obj_t *baseline;
+    lv_obj_t *curve;
+    lv_obj_t *chart_empty;
+    book_cell_t book[2][QUOTE_DETAIL_LEVELS];  // [0]=卖盘 [1]=买盘
+    lv_obj_t *hint;
+} detail_widgets_t;
+
 static chrome_t s_list_chrome;
 static chrome_t s_setup_chrome;
 static chrome_t s_menu_chrome;
+static chrome_t s_detail_chrome;
 static row_widgets_t s_rows[ROW_COUNT];
 static menu_row_widgets_t s_menu_rows[MENU_ROW_COUNT];
+static detail_widgets_t s_detail;
+static lv_obj_t *s_detail_refresh;
+static lv_point_precise_t s_curve_points[QUOTE_MINUTE_MAX];
 static lv_obj_t *s_list_status;
 static lv_obj_t *s_list_hint;
 static lv_obj_t *s_list_refresh;
@@ -192,7 +236,7 @@ static void wifi_blink_timer_cb(lv_timer_t *timer)
     (void)timer;
     static bool dim;
     dim = !dim;
-    chrome_t *chromes[] = {&s_list_chrome, &s_setup_chrome, &s_menu_chrome};
+    chrome_t *chromes[] = {&s_list_chrome, &s_setup_chrome, &s_menu_chrome, &s_detail_chrome};
     for (size_t i = 0; i < sizeof(chromes) / sizeof(chromes[0]); i++) {
         if (!chromes[i]->wifi_connecting) continue;
         for (int bar = 0; bar < WIFI_BAR_COUNT; bar++) {
@@ -219,13 +263,125 @@ static void clock_timer_cb(lv_timer_t *timer)
     if (strcmp(text, s_clock_text) == 0) return;
     snprintf(s_clock_text, sizeof(s_clock_text), "%s", text);
 
-    chrome_t *chromes[] = {&s_list_chrome, &s_setup_chrome, &s_menu_chrome};
+    chrome_t *chromes[] = {&s_list_chrome, &s_setup_chrome, &s_menu_chrome, &s_detail_chrome};
     for (size_t i = 0; i < sizeof(chromes) / sizeof(chromes[0]); i++) {
         if (!chromes[i]->clock) continue;
         lv_label_set_text(chromes[i]->clock, s_clock_text);
         lv_obj_set_style_text_color(chromes[i]->clock,
                                     lv_color_hex(valid ? COLOR_TEXT : COLOR_MUTED), 0);
     }
+}
+
+// 分时横轴:242 格按真实分钟落位,x 与曲线、竖分隔线共用同一换算。
+static int chart_slot_x(int slot)
+{
+    const int left = DETAIL_CHART_INSET;
+    const int right = DETAIL_CHART_WIDTH - DETAIL_CHART_INSET;
+    if (slot < 0) slot = 0;
+    if (slot >= QUOTE_MINUTE_MAX) slot = QUOTE_MINUTE_MAX - 1;
+    return left + (right - left) * slot / (QUOTE_MINUTE_MAX - 1);
+}
+
+// 详情页:上半屏报价与分时,下半屏两列五档;12px 字体行高 15px,行距 19px。
+static void build_detail_screen(void)
+{
+    s_detail_chrome.screen = make_screen();
+    build_header(&s_detail_chrome, "详情");
+    lv_obj_t *screen = s_detail_chrome.screen;
+
+    s_detail.name = make_label(screen, &lv_font_cn_16, COLOR_TEXT, 12, 46, 126, 22, "");
+    lv_label_set_long_mode(s_detail.name, LV_LABEL_LONG_DOT);
+    s_detail.code = make_label(screen, &lv_font_montserrat_12, COLOR_MUTED, 12, 68, 90, 16, "");
+    s_detail.price = make_label(screen, &lv_font_montserrat_20, COLOR_TEXT, 140, 44, 88, 24, "--");
+    lv_obj_set_style_text_align(s_detail.price, LV_TEXT_ALIGN_RIGHT, 0);
+    s_detail.change = make_label(screen, &lv_font_montserrat_12, COLOR_MUTED, 140, 68, 88, 16, "");
+    lv_obj_set_style_text_align(s_detail.change, LV_TEXT_ALIGN_RIGHT, 0);
+    make_box(screen, 12, 86, 216, 1, COLOR_LINE, 0);
+
+    static const char *const metric_names[3] = {"额", "市值", "PE"};
+    static const int metric_label_x[3] = {12, 84, 172};
+    static const int metric_value_x[3] = {28, 112, 191};
+    static const int metric_value_width[3] = {52, 56, 37};
+    for (int i = 0; i < 3; i++) {
+        make_label(screen, &lv_font_cn_12_detail, COLOR_MUTED, metric_label_x[i],
+                   DETAIL_METRIC_TOP, 30, DETAIL_TEXT_HEIGHT, metric_names[i]);
+        s_detail.metric_value[i] = make_label(screen, &lv_font_cn_12_detail, COLOR_TEXT,
+                                              metric_value_x[i], DETAIL_METRIC_TOP,
+                                              metric_value_width[i], DETAIL_TEXT_HEIGHT, "--");
+        lv_obj_set_style_text_align(s_detail.metric_value[i], LV_TEXT_ALIGN_RIGHT, 0);
+    }
+
+    // 高/开/低单独一行,三组等距排布,数值右对齐。
+    static const char *const range_names[3] = {"高", "开", "低"};
+    static const int range_label_x[3] = {12, 88, 164};
+    static const int range_value_x[3] = {26, 102, 178};
+    for (int i = 0; i < 3; i++) {
+        make_label(screen, &lv_font_cn_12_detail, COLOR_MUTED, range_label_x[i],
+                   DETAIL_RANGE_TOP, 14, DETAIL_TEXT_HEIGHT, range_names[i]);
+        s_detail.range_value[i] = make_label(screen, &lv_font_cn_12_detail, COLOR_TEXT,
+                                             range_value_x[i], DETAIL_RANGE_TOP, 50,
+                                             DETAIL_TEXT_HEIGHT, "--");
+        lv_obj_set_style_text_align(s_detail.range_value[i], LV_TEXT_ALIGN_RIGHT, 0);
+    }
+    make_box(screen, 12, DETAIL_DIVIDER_TOP, 216, 1, COLOR_LINE, 0);
+
+    s_detail.chart = make_box(screen, DETAIL_CHART_LEFT, DETAIL_CHART_TOP,
+                              DETAIL_CHART_WIDTH, DETAIL_CHART_HEIGHT, COLOR_PANEL, 8);
+    // 纵轴以昨收为中心对称,基准线固定在面板中线。
+    s_detail.baseline = make_box(s_detail.chart, DETAIL_CHART_INSET, DETAIL_CHART_HEIGHT / 2,
+                                 DETAIL_CHART_WIDTH - 2 * DETAIL_CHART_INSET, 1, COLOR_LINE, 0);
+    // 开盘、午休分界、收盘三条竖线替代时间刻度;曲线后建,压在线之上。
+    static const int separator_slots[3] = {0, 120, QUOTE_MINUTE_MAX - 1};
+    for (int i = 0; i < 3; i++) {
+        make_box(s_detail.chart, chart_slot_x(separator_slots[i]), DETAIL_CHART_INSET, 1,
+                 DETAIL_CHART_HEIGHT - 2 * DETAIL_CHART_INSET, COLOR_LINE, 0);
+    }
+    s_detail.curve = lv_line_create(s_detail.chart);
+    lv_obj_set_pos(s_detail.curve, 0, 0);
+    lv_obj_set_size(s_detail.curve, DETAIL_CHART_WIDTH, DETAIL_CHART_HEIGHT);
+    lv_obj_remove_flag(s_detail.curve, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(s_detail.curve, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_line_width(s_detail.curve, 2, 0);
+    lv_obj_set_style_line_rounded(s_detail.curve, true, 0);
+    lv_obj_set_style_line_color(s_detail.curve, lv_color_hex(COLOR_ACCENT), 0);
+    s_detail.chart_empty = make_label(s_detail.chart, &lv_font_cn_12_detail, COLOR_MUTED, 0,
+                                      (DETAIL_CHART_HEIGHT - DETAIL_TEXT_HEIGHT) / 2,
+                                      DETAIL_CHART_WIDTH, DETAIL_TEXT_HEIGHT, "无分时数据");
+    lv_obj_set_style_text_align(s_detail.chart_empty, LV_TEXT_ALIGN_CENTER, 0);
+    make_box(screen, 12, 200, 216, 1, COLOR_LINE, 0);
+
+    static const char *const book_labels[2][QUOTE_DETAIL_LEVELS] = {
+        {"卖一", "卖二", "卖三", "卖四", "卖五"},
+        {"买一", "买二", "买三", "买四", "买五"},
+    };
+    for (int side = 0; side < 2; side++) {
+        const int left = side == 0 ? DETAIL_BOOK_ASK_LEFT : DETAIL_BOOK_BID_LEFT;
+        for (int i = 0; i < QUOTE_DETAIL_LEVELS; i++) {
+            book_cell_t *cell = &s_detail.book[side][i];
+            const int y = DETAIL_BOOK_TOP + i * DETAIL_BOOK_ROW_HEIGHT;
+            cell->label = make_label(screen, &lv_font_cn_12_detail, COLOR_MUTED, left, y, 24,
+                                     DETAIL_TEXT_HEIGHT, book_labels[side][i]);
+            cell->price = make_label(screen, &lv_font_cn_12_detail, COLOR_FLAT, left + 24, y, 44,
+                                     DETAIL_TEXT_HEIGHT, "--");
+            lv_obj_set_style_text_align(cell->price, LV_TEXT_ALIGN_RIGHT, 0);
+            cell->volume = make_label(screen, &lv_font_cn_12_detail, COLOR_TEXT, left + 70, y, 36,
+                                      DETAIL_TEXT_HEIGHT, "--");
+            lv_obj_set_style_text_align(cell->volume, LV_TEXT_ALIGN_RIGHT, 0);
+        }
+    }
+
+    s_detail_refresh = lv_spinner_create(screen);
+    lv_obj_set_pos(s_detail_refresh, 10, DETAIL_HINT_TOP);
+    lv_obj_set_size(s_detail_refresh, 16, 16);
+    lv_obj_set_style_arc_width(s_detail_refresh, 2, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_detail_refresh, 2, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_detail_refresh, lv_color_hex(COLOR_LINE), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_detail_refresh, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
+    lv_spinner_set_anim_params(s_detail_refresh, 900, 270);
+    lv_obj_add_flag(s_detail_refresh, LV_OBJ_FLAG_HIDDEN);
+
+    s_detail.hint = make_label(screen, &lv_font_cn_12_detail, COLOR_MUTED, 30, DETAIL_HINT_TOP,
+                               198, DETAIL_TEXT_HEIGHT, "短按 OK 刷新   长按 OK 返回");
 }
 
 void ui_app_init(void)
@@ -359,6 +515,8 @@ void ui_app_init(void)
     s_menu_hint = make_label(s_menu_chrome.screen, &lv_font_cn_16, COLOR_ACCENT,
                              12, 292, 216, 22, "上下选择  OK 调整");
 
+    build_detail_screen();
+
     s_active = s_list_chrome.screen;
     lv_screen_load(s_active);
     lv_timer_create(wifi_blink_timer_cb, WIFI_BLINK_PERIOD_MS, NULL);
@@ -439,6 +597,17 @@ void ui_app_show_menu(void)
     if (!bsp_lvgl_lock(200)) return;
     if (s_active != s_menu_chrome.screen) {
         s_active = s_menu_chrome.screen;
+        lv_screen_load(s_active);
+    }
+    bsp_lvgl_unlock();
+}
+
+void ui_app_show_detail(void)
+{
+    if (!s_detail_chrome.screen) return;
+    if (!bsp_lvgl_lock(200)) return;
+    if (s_active != s_detail_chrome.screen) {
+        s_active = s_detail_chrome.screen;
         lv_screen_load(s_active);
     }
     bsp_lvgl_unlock();
@@ -546,6 +715,148 @@ void ui_app_update_list(const ui_list_view_t *view)
     }
     set_wifi(&s_list_chrome, view->wifi_connected, view->wifi_connecting, view->rssi);
     set_battery(&s_list_chrome, view->battery_pct, view->battery_ok);
+    bsp_lvgl_unlock();
+}
+
+static void set_book_cell(book_cell_t *cell, const quote_level_t *level, double prev_close,
+                          const char *code)
+{
+    char price_text[16] = "--";
+    char volume_text[16] = "--";
+    uint32_t color = COLOR_MUTED;
+    if (level && level->price > 0) {
+        quote_format_price(price_text, sizeof(price_text), code, level->price);
+        snprintf(volume_text, sizeof(volume_text), "%.0f", level->volume);
+        color = trend_color(quote_trend(level->price - prev_close));
+    }
+    lv_label_set_text(cell->price, price_text);
+    lv_obj_set_style_text_color(cell->price, lv_color_hex(color), 0);
+    lv_label_set_text(cell->volume, volume_text);
+}
+
+// 横轴固定为 09:30-15:00 的 242 格,右侧留空;纵轴以昨收对称缩放,样本不足时只保留空面板。
+static void update_detail_chart(const quote_detail_t *detail)
+{
+    const bool drawable = detail && detail->valid && detail->minute_count >= 2 &&
+                          detail->prev_close > 0;
+    if (!drawable) {
+        lv_obj_add_flag(s_detail.curve, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_detail.baseline, LV_OBJ_FLAG_HIDDEN);
+        if (detail && detail->valid) {
+            lv_obj_clear_flag(s_detail.chart_empty, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_detail.chart_empty, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+    lv_obj_clear_flag(s_detail.curve, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_detail.baseline, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_detail.chart_empty, LV_OBJ_FLAG_HIDDEN);
+
+    const int count = detail->minute_count;
+    double low = detail->minute[0];
+    double high = detail->minute[0];
+    for (int i = 1; i < count; i++) {
+        if (detail->minute[i] < low) low = detail->minute[i];
+        if (detail->minute[i] > high) high = detail->minute[i];
+    }
+    const double prev = detail->prev_close;
+    double span = high - prev > prev - low ? high - prev : prev - low;
+    if (span < prev * 0.002) span = prev * 0.002;  // 平盘时别把噪声放大成锯齿
+
+    const int center = DETAIL_CHART_HEIGHT / 2;
+    const int half = DETAIL_CHART_HEIGHT / 2 - 3;
+    for (int i = 0; i < count; i++) {
+        double ratio = (detail->minute[i] - prev) / span;
+        if (ratio > 1) ratio = 1;
+        if (ratio < -1) ratio = -1;
+        s_curve_points[i].x = chart_slot_x(detail->minute_slot[i]);
+        s_curve_points[i].y = center - (int)lround(ratio * half);
+    }
+    lv_line_set_points(s_detail.curve, s_curve_points, (uint32_t)count);
+    lv_obj_set_style_line_color(s_detail.curve,
+                                lv_color_hex(trend_color(quote_trend(detail->price - prev))), 0);
+    lv_obj_invalidate(s_detail.curve);
+}
+
+void ui_app_update_detail(const ui_detail_view_t *view)
+{
+    if (!view) return;
+    if (!bsp_lvgl_lock(300)) return;
+
+    const quote_detail_t *detail = view->detail;
+    const char *code = view->code ? view->code : "";
+    const bool valid = detail && detail->valid;
+    const int decimals = quote_price_decimals(code);
+
+    lv_label_set_text(s_detail.name, view->name && view->name[0] ? view->name : code);
+    lv_label_set_text(s_detail.code, code);
+
+    char price_text[24] = "--";
+    char change_text[40] = "";
+    uint32_t color = COLOR_MUTED;
+    if (valid) {
+        quote_format_price(price_text, sizeof(price_text), code, detail->price);
+        const double change = detail->price - detail->prev_close;
+        char amount[16];
+        char pct[16];
+        quote_format_signed(amount, sizeof(amount), change, decimals);
+        quote_format_percent(pct, sizeof(pct),
+                             detail->prev_close > 0 ? change / detail->prev_close * 100.0 : 0.0);
+        snprintf(change_text, sizeof(change_text), "%s %s", amount, pct);
+        color = trend_color(quote_trend(change));
+    }
+    lv_label_set_text(s_detail.price, price_text);
+    lv_obj_set_style_text_color(s_detail.price, lv_color_hex(color), 0);
+    lv_label_set_text(s_detail.change, change_text);
+    lv_obj_set_style_text_color(s_detail.change, lv_color_hex(color), 0);
+
+    char amount_text[24] = "--";
+    char cap_text[24] = "--";
+    char pe_text[24] = "--";
+    if (valid) {
+        // 成交额:腾讯字段是万元,换成元后按 万/亿 紧凑显示。
+        if (detail->amount_wan > 0) {
+            quote_format_compact(amount_text, sizeof(amount_text), detail->amount_wan * 1e4);
+        }
+        if (detail->has_market_cap) {
+            quote_format_market_cap(cap_text, sizeof(cap_text), detail->market_cap_yi);
+        }
+        if (detail->has_pe) snprintf(pe_text, sizeof(pe_text), "%.1f", detail->pe);
+    }
+    lv_label_set_text(s_detail.metric_value[0], amount_text);
+    lv_label_set_text(s_detail.metric_value[1], cap_text);
+    lv_label_set_text(s_detail.metric_value[2], pe_text);
+
+    char high_text[16] = "--";
+    char open_text[16] = "--";
+    char low_text[16] = "--";
+    if (valid) {
+        quote_format_price(high_text, sizeof(high_text), code, detail->high);
+        quote_format_price(open_text, sizeof(open_text), code, detail->open);
+        quote_format_price(low_text, sizeof(low_text), code, detail->low);
+    }
+    lv_label_set_text(s_detail.range_value[0], high_text);
+    lv_label_set_text(s_detail.range_value[1], open_text);
+    lv_label_set_text(s_detail.range_value[2], low_text);
+
+    for (int i = 0; i < QUOTE_DETAIL_LEVELS; i++) {
+        set_book_cell(&s_detail.book[0][i], valid ? &detail->ask[i] : NULL,
+                      valid ? detail->prev_close : 0, code);
+        set_book_cell(&s_detail.book[1][i], valid ? &detail->bid[i] : NULL,
+                      valid ? detail->prev_close : 0, code);
+    }
+
+    update_detail_chart(detail);
+    lv_label_set_text(s_detail.hint, view->status && view->status[0] ? view->status
+                                                                    : "短按 OK 刷新   长按 OK 返回");
+    if (view->fetching) {
+        lv_obj_remove_flag(s_detail_refresh, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_detail_refresh, LV_OBJ_FLAG_HIDDEN);
+    }
+    set_wifi(&s_detail_chrome, view->wifi_connected, view->wifi_connecting, view->rssi);
+    set_battery(&s_detail_chrome, view->battery_pct, view->battery_ok);
     bsp_lvgl_unlock();
 }
 
